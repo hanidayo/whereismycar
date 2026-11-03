@@ -1,0 +1,19 @@
+# 비밀 값
+server/.env
+server/data/
+android/app/google-services.json
+*service-account*.json
+
+# 빌드 산출물
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+ios/Eodi.xcodeproj/
+ios/Eodi/Info.plist
+__pycache__/
+.DS_Store
+ios/build/
+build-logs/
+*.apk

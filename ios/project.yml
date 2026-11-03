@@ -1,0 +1,35 @@
+name: Eodi
+options:
+  bundleIdPrefix: kr.hanidayo
+  deploymentTarget:
+    iOS: "17.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    # DEVELOPMENT_TEAM: ABCDE12345   # 본인 팀 ID를 넣으면 xcodegen 할 때마다 다시 안 골라도 됨
+targets:
+  Eodi:
+    type: application
+    platform: iOS
+    sources: [Eodi]
+    scheme: {}   # xcodebuild -scheme Eodi 로 명령줄 빌드할 수 있게 공유 스킴 생성
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: kr.hanidayo.eodi
+        PRODUCT_NAME: Eodi
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        MARKETING_VERSION: "0.2"
+        CURRENT_PROJECT_VERSION: "2"
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: ""
+    info:
+      path: Eodi/Info.plist
+      properties:
+        CFBundleDisplayName: 어디댔지
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIBackgroundModes: [location]
+        NSLocationWhenInUseUsageDescription: 주차한 위치를 저장하기 위해 위치를 사용합니다.
+        NSLocationAlwaysAndWhenInUseUsageDescription: 운전 중 화면이 꺼져 있어도 주차 위치와 층을 기록하려면 '항상 허용'이 필요합니다.
+        NSMotionUsageDescription: 기압계로 지하 주차장 층수를 계산합니다.
+        NSCameraUsageDescription: 주차 기둥 번호를 사진으로 남깁니다.

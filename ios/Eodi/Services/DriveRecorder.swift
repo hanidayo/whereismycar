@@ -1,0 +1,225 @@
+import Foundation
+import Combine
+import CoreLocation
+import CoreMotion
+
+struct PressureSample: Codable {
+    var date: Date
+    var kPa: Double
+}
+
+/// 운전 중 상태. 앱이 중간에 종료돼도 이어갈 수 있게 저장합니다.
+struct DriveState: Codable {
+    var carID: UUID
+    var startedAt: Date
+    /// 마지막으로 GPS가 좋았던 시점(=주차장 입구 직전)의 기압
+    var refPressure: Double?
+    var refLat: Double?
+    var refLon: Double?
+    var refAccuracy: Double?
+    var refDate: Date?
+    var lastLat: Double?
+    var lastLon: Double?
+    var lastAccuracy: Double?
+}
+
+@MainActor
+final class DriveRecorder: NSObject, ObservableObject {
+    static let shared = DriveRecorder()
+
+    @Published private(set) var state: DriveState?
+    @Published private(set) var latestPressure: PressureSample?
+    @Published private(set) var authorizationStatus: CLAuthorizationStatus = .notDetermined
+
+    /// 이 정확도(m) 이하면 "지상에서 GPS가 잘 잡힌 상태"로 봄
+    static let goodAccuracy: CLLocationAccuracy = 25
+    /// 기준 기압은 마지막 GPS 시점보다 몇 초 앞의 값을 씀(경사로에 들어서기 전)
+    static let lookback: TimeInterval = 5
+
+    private let locationManager = CLLocationManager()
+    private let altimeter = CMAltimeter()
+    private var buffer: [PressureSample] = []
+    private var sensorsRunning = false
+    private let stateKey = "eodi.driveState"
+
+    var isAltimeterAvailable: Bool { CMAltimeter.isRelativeAltitudeAvailable() }
+
+    /// 실시간: 기준점 대비 높이 변화(m)
+    var liveDelta: Double? {
+        guard let ref = state?.refPressure, let now = latestPressure?.kPa else { return nil }
+        return Altitude.meters(kPa: now) - Altitude.meters(kPa: ref)
+    }
+
+    override init() {
+        super.init()
+        locationManager.delegate = self
+        locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        locationManager.activityType = .automotiveNavigation
+        locationManager.pausesLocationUpdatesAutomatically = false
+        authorizationStatus = locationManager.authorizationStatus
+
+        if let data = UserDefaults.standard.data(forKey: stateKey),
+           let saved = try? JSONDecoder().decode(DriveState.self, from: data) {
+            state = saved
+            startSensors() // 운전 중에 앱이 재시작된 경우
+        }
+    }
+
+    func requestPermissions() {
+        switch locationManager.authorizationStatus {
+        case .notDetermined: locationManager.requestWhenInUseAuthorization()
+        case .authorizedWhenInUse: locationManager.requestAlwaysAuthorization()
+        default: break
+        }
+    }
+
+    // MARK: - 운전 시작 / 주차
+
+    func startDrive(carID: UUID) {
+        state = DriveState(carID: carID, startedAt: Date())
+        buffer.removeAll()
+        persist()
+        startSensors()
+    }
+
+    /// 주차 확정: 지금 기압과 기준 기압 차이로 층을 계산하고 기록을 남김
+    @discardableResult
+    func park(carID: UUID?) async -> ParkingRecord? {
+        let store = ParkingStore.shared
+        let s = state
+        guard let id = carID ?? s?.carID ?? store.defaultCar?.id else { return nil }
+        let nowPressure = await currentPressure()
+
+        var delta: Double?
+        if let ref = s?.refPressure, let now = nowPressure {
+            delta = Altitude.meters(kPa: now) - Altitude.meters(kPa: ref)
+        }
+
+        var coordinate: CLLocationCoordinate2D?
+        var accuracy: Double?
+        if let lat = s?.refLat, let lon = s?.refLon {
+            coordinate = .init(latitude: lat, longitude: lon); accuracy = s?.refAccuracy
+        } else if let lat = s?.lastLat, let lon = s?.lastLon {
+            coordinate = .init(latitude: lat, longitude: lon); accuracy = s?.lastAccuracy
+        } else if let loc = locationManager.location {
+            coordinate = loc.coordinate; accuracy = loc.horizontalAccuracy
+        }
+
+        stopDrive()
+        let record = store.recordParking(carID: id, coordinate: coordinate, accuracy: accuracy, delta: delta)
+        // 가족 공유를 쓰면 ntfy가 모두에게(나 포함) 알리므로 로컬 알림은 생략
+        if !store.sync.isConfigured {
+            Notifier.post(title: "\(record.levelName) · \(store.carName(id))",
+                          body: "주차 위치를 기록했어요. 기둥 번호 사진을 찍어두면 더 찾기 쉬워요.")
+        }
+        return record
+    }
+
+    func stopDrive() {
+        state = nil
+        UserDefaults.standard.removeObject(forKey: stateKey)
+        locationManager.stopUpdatingLocation()
+        locationManager.allowsBackgroundLocationUpdates = false
+        altimeter.stopRelativeAltitudeUpdates()
+        sensorsRunning = false
+        buffer.removeAll()
+    }
+
+    // MARK: - 센서
+
+    private func startSensors() {
+        guard !sensorsRunning else { return }
+        sensorsRunning = true
+        locationManager.allowsBackgroundLocationUpdates = true
+        locationManager.showsBackgroundLocationIndicator = true
+        locationManager.startUpdatingLocation()
+
+        guard isAltimeterAvailable else { return }
+        altimeter.startRelativeAltitudeUpdates(to: .main) { [weak self] data, _ in
+            guard let data else { return }
+            let sample = PressureSample(date: Date(), kPa: data.pressure.doubleValue)
+            MainActor.assumeIsolated { self?.handle(sample: sample) }
+        }
+    }
+
+    private func handle(sample: PressureSample) {
+        latestPressure = sample
+        buffer.append(sample)
+        let cutoff = Date().addingTimeInterval(-180)
+        buffer.removeAll { $0.date < cutoff }
+    }
+
+    private func handle(location loc: CLLocation) {
+        guard var s = state else { return }
+        s.lastLat = loc.coordinate.latitude
+        s.lastLon = loc.coordinate.longitude
+        s.lastAccuracy = loc.horizontalAccuracy
+
+        let age = -loc.timestamp.timeIntervalSinceNow
+        if loc.horizontalAccuracy > 0, loc.horizontalAccuracy <= Self.goodAccuracy, age < 10 {
+            s.refLat = loc.coordinate.latitude
+            s.refLon = loc.coordinate.longitude
+            s.refAccuracy = loc.horizontalAccuracy
+            s.refDate = loc.timestamp
+            if let p = pressure(near: loc.timestamp.addingTimeInterval(-Self.lookback)) {
+                s.refPressure = p
+            }
+        }
+        state = s
+        persist()
+    }
+
+    private func pressure(near date: Date) -> Double? {
+        guard !buffer.isEmpty else { return latestPressure?.kPa }
+        return buffer.min {
+            abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date))
+        }?.kPa
+    }
+
+    /// 지금 기압 한 번 읽기(앱이 막 깨어나 센서가 꺼져 있어도 동작)
+    private func currentPressure(timeout: TimeInterval = 4) async -> Double? {
+        if let s = latestPressure, Date().timeIntervalSince(s.date) < 3 { return s.kPa }
+        guard isAltimeterAvailable else { return nil }
+        return await withCheckedContinuation { cont in
+            let oneShot = CMAltimeter()
+            let once = OnceFlag()
+            oneShot.startRelativeAltitudeUpdates(to: .main) { data, _ in
+                guard !once.finished else { return }
+                once.finished = true
+                oneShot.stopRelativeAltitudeUpdates()
+                cont.resume(returning: data?.pressure.doubleValue)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) {
+                guard !once.finished else { return }
+                once.finished = true
+                oneShot.stopRelativeAltitudeUpdates()
+                cont.resume(returning: nil)
+            }
+        }
+    }
+
+    private func persist() {
+        guard let state, let data = try? JSONEncoder().encode(state) else { return }
+        UserDefaults.standard.set(data, forKey: stateKey)
+    }
+}
+
+/// asyncAfter의 @Sendable 클로저에서 캡처한 var를 바꿀 수 없어서 참조 타입으로 감쌈 (둘 다 main 큐에서만 접근)
+private final class OnceFlag { var finished = false }
+
+extension DriveRecorder: CLLocationManagerDelegate {
+    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let loc = locations.last else { return }
+        Task { @MainActor in self.handle(location: loc) }
+    }
+
+    nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        let status = manager.authorizationStatus
+        Task { @MainActor in
+            self.authorizationStatus = status
+            if status == .authorizedWhenInUse { self.locationManager.requestAlwaysAuthorization() }
+        }
+    }
+
+    nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {}
+}
