@@ -4,7 +4,8 @@
 #   bash build.sh            도구 점검 → 안드로이드 APK → 아이폰 설치
 #   bash build.sh check      도구 점검만
 #   bash build.sh android    안드로이드 디버그 APK만
-#   bash build.sh ios        아이폰 빌드·설치만
+#   bash build.sh ios        아이폰 빌드·설치만 (Xcode 서명, USB)
+#   bash build.sh ipa        서명 안 된 Eodi.ipa 만들기 → Sideloadly로 설치 (서명·기기 연결 불필요)
 #
 # 아이폰 옵션(환경변수): TEAM_ID=XXXXXXXXXX  BUNDLE_ID=kr.hanidayo.eodi
 # 로그는 build-logs/ 폴더에 남습니다.
@@ -132,6 +133,7 @@ check_ios() {
         need "xcodegen을 준비하지 못했어요" "Homebrew 설치 후: brew install xcodegen"
     fi
 
+    [ "$MODE" = ipa ] && return
     TEAM=$(find_team)
     if [ -n "$TEAM" ]; then ok "서명 팀: $TEAM"
     else need "Xcode에 Apple ID가 로그인돼 있지 않아요" \
@@ -255,6 +257,24 @@ build_ios() {
     return 0
 }
 
+build_ipa() {
+    bold "▶ 서명 안 된 IPA 만들기"
+    cd "$ROOT/ios" || return 1
+    "$XCODEGEN" generate 2>&1 | tee "$LOGS/xcodegen.log" || { red "✗ xcodegen 실패"; return 1; }
+    xcodebuild -project Eodi.xcodeproj -scheme Eodi -configuration Release \
+        -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+        CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+        build 2>&1 | tee "$LOGS/ipa.log" | grep -E "error:|BUILD (SUCCEEDED|FAILED)"
+    if ! grep -q "BUILD SUCCEEDED" "$LOGS/ipa.log"; then
+        red "✗ 빌드 실패 → build-logs/ipa.log"; return 1
+    fi
+    rm -rf Payload && mkdir Payload
+    cp -R build/Build/Products/Release-iphoneos/Eodi.app Payload/
+    rm -f "$ROOT/Eodi.ipa"
+    zip -qry "$ROOT/Eodi.ipa" Payload && rm -rf Payload
+    green "✓ $ROOT/Eodi.ipa  → Sideloadly에 끌어다 놓고 설치하세요"
+}
+
 # ------------------------------------------------------------------ 실행
 
 [ "$(uname)" = "Darwin" ] || { red "macOS에서 실행하세요."; exit 1; }
@@ -263,8 +283,9 @@ case "$MODE" in
     check)   check_android; check_ios ;;
     android) check_android ;;
     ios)     check_ios ;;
+    ipa)     check_ios ;;
     all)     check_android; check_ios ;;
-    *)       echo "사용법: bash build.sh [check|android|ios]"; exit 1 ;;
+    *)       echo "사용법: bash build.sh [check|android|ios|ipa]"; exit 1 ;;
 esac
 
 if [ "$MISSING" = 1 ]; then
@@ -275,4 +296,5 @@ fi
 RESULT=0
 if [ "$MODE" = all ] || [ "$MODE" = android ]; then build_android || RESULT=1; fi
 if [ "$MODE" = all ] || [ "$MODE" = ios ]; then build_ios || RESULT=1; fi
+if [ "$MODE" = ipa ]; then build_ipa || RESULT=1; fi
 exit $RESULT
