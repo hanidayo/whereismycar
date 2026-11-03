@@ -6,6 +6,19 @@ on:
   workflow_dispatch:
 
 jobs:
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 서버 API 테스트
+        working-directory: server
+        run: |
+          pip install -q -r requirements.txt
+          python test_api.py
+
   android:
     runs-on: ubuntu-latest
     steps:

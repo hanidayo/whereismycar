@@ -33,12 +33,17 @@ struct StartDriveIntent: AppIntent {
     static var description = IntentDescription("주차 층 계산을 위해 위치와 기압 기록을 시작합니다.")
     static var openAppWhenRun: Bool = false
 
-    @Parameter(title: "차")
+    @Parameter(title: "차", description: "비워 두면 연결된 CarPlay로 자동 선택")
     var car: CarEntity?
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        if let id = car?.id ?? ParkingStore.shared.defaultCar?.id {
+        let store = ParkingStore.shared
+        var id = car?.id
+        if id == nil {
+            id = store.car(for: await CarPlayRoute.waitForCurrent())?.id
+        }
+        if let id = id ?? DriveRecorder.shared.state?.carID ?? store.defaultCar?.id {
             DriveRecorder.shared.startDrive(carID: id)
         }
         return .result()
@@ -51,7 +56,7 @@ struct ParkIntent: AppIntent {
     static var description = IntentDescription("지금 위치와 층을 주차 위치로 저장하고 가족에게 알립니다.")
     static var openAppWhenRun: Bool = false
 
-    @Parameter(title: "차")
+    @Parameter(title: "차", description: "비워 두면 운전 시작 때 고른 차")
     var car: CarEntity?
 
     @MainActor

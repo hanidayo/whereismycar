@@ -58,6 +58,8 @@ data class DriveState(
     val lastMoveAt: Long? = null,
     /** 기준점 이후 가장 높은 기압(hPa, =가장 낮은 위치). 자동 종료 때 층 계산에 씀 */
     val peakPressure: Double? = null,
+    /** "bt" = 블루투스·수동, "activity" = 차량 탑승 감지로 시작 */
+    val source: String = "bt",
 )
 
 data class LiveDrive(val state: DriveState, val pressure: Double?, val hasBarometer: Boolean) {
@@ -78,6 +80,8 @@ class DriveService : Service(), SensorEventListener {
     companion object {
         private const val ACTION_START = "kr.hanidayo.eodi.START"
         private const val ACTION_PARK = "kr.hanidayo.eodi.PARK"
+        private const val ACTION_START_ACTIVITY = "kr.hanidayo.eodi.START_ACTIVITY"
+        private const val ACTION_PARK_ACTIVITY = "kr.hanidayo.eodi.PARK_ACTIVITY"
         private const val EXTRA_CAR = "car"
         private const val NOTIFICATION_ID = 41
         private const val PREFS = "drive"
@@ -99,6 +103,8 @@ class DriveService : Service(), SensorEventListener {
 
         fun start(context: Context, carId: String) = send(context, ACTION_START, carId)
         fun park(context: Context, carId: String?) = send(context, ACTION_PARK, carId)
+        fun startFromActivity(context: Context, carId: String) = send(context, ACTION_START_ACTIVITY, carId)
+        fun parkFromActivity(context: Context) = send(context, ACTION_PARK_ACTIVITY, null)
 
         private fun send(context: Context, action: String, carId: String?) {
             val i = Intent(context, DriveService::class.java).setAction(action).putExtra(EXTRA_CAR, carId)
@@ -149,6 +155,14 @@ class DriveService : Service(), SensorEventListener {
         when (intent?.action) {
             ACTION_START -> begin(carId ?: Store.defaultCar?.id ?: return stopAndReturn())
             ACTION_PARK -> scope.launch { finishParking(carId, auto = false) }
+            // 블루투스로 이미 기록 중이면 끼어들지 않음
+            ACTION_START_ACTIVITY -> if (state == null) begin(carId ?: return stopAndReturn(), "activity") else startSensors()
+            ACTION_PARK_ACTIVITY -> when (state?.source) {
+                // 차에서 내린 뒤 감지되므로 사람이 이미 움직였을 수 있음 → 자동 기록처럼 최저점 사용
+                "activity" -> scope.launch { finishParking(null, auto = true) }
+                null -> return stopAndReturn()
+                else -> startSensors() // 블루투스 운전은 블루투스 해제로 끝냄
+            }
             else -> if (state != null) startSensors() else return stopAndReturn() // 시스템이 재시작한 경우
         }
         return START_STICKY
@@ -159,8 +173,16 @@ class DriveService : Service(), SensorEventListener {
         return START_NOT_STICKY
     }
 
-    private fun begin(carId: String) {
-        state = DriveState(carId = carId)
+    private fun begin(carId: String, source: String = "bt") {
+        val s = state
+        // 이미 기록 중이면(탑승 감지 후 블루투스 연결 등) 기준점은 유지하고 차·방식만 맞춤
+        if (s != null && System.currentTimeMillis() - s.startedAt < 15 * 60_000L) {
+            state = s.copy(carId = carId, source = if (source == "bt") "bt" else s.source)
+            saveState()
+            startSensors()
+            return
+        }
+        state = DriveState(carId = carId, source = source)
         buffer.clear()
         saveState()
         startSensors()

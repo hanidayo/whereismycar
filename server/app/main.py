@@ -239,6 +239,7 @@ class ParkingIn(BaseModel):
 
 
 class ParkingPatch(BaseModel):
+    car_id: Optional[str] = None
     level: Optional[int] = None
     calibrated: Optional[bool] = None
     pillar_text: Optional[str] = None
@@ -368,6 +369,10 @@ def post_parking(body: ParkingIn, tasks: BackgroundTasks):
 def patch_parking(parking_id: str, body: ParkingPatch, tasks: BackgroundTasks):
     pid = nid(parking_id)
     changes = body.model_dump(exclude_unset=True)
+    if changes.get("car_id"):
+        changes["car_id"] = nid(changes["car_id"])
+    else:
+        changes.pop("car_id", None)
     with _lock, _db:
         row = _db.execute("SELECT * FROM parkings WHERE id=?", (pid,)).fetchone()
         if not row:
@@ -380,15 +385,22 @@ def patch_parking(parking_id: str, body: ParkingPatch, tasks: BackgroundTasks):
                     (*values, now_iso(), pid))
     level_changed = "level" in changes and changes["level"] != row["level"]
     pillar_changed = "pillar_text" in changes and changes["pillar_text"] != row["pillar_text"]
-    if level_changed or pillar_changed:
+    car_changed = "car_id" in changes and changes["car_id"] != row["car_id"]
+    if level_changed or pillar_changed or car_changed:
         level = changes.get("level", row["level"])
         pillar = changes.get("pillar_text", row["pillar_text"])
-        msg = f"{level_name(row['level'])} → {level_name(level)}" if level_changed else "기둥 표지 추가"
+        car_id = changes.get("car_id", row["car_id"])
+        if level_changed:
+            msg = f"{level_name(row['level'])} → {level_name(level)}"
+        elif car_changed:
+            msg = f"차 변경: {car_name(row['car_id'])} → {car_name(car_id)}"
+        else:
+            msg = "기둥 표지 추가"
         if pillar:
             msg += f" · {pillar}"
-        tasks.add_task(notify, f"수정됨: {level_name(level)} · {car_name(row['car_id'])}", msg,
+        tasks.add_task(notify, f"수정됨: {level_name(level)} · {car_name(car_id)}", msg,
                        row["latitude"], row["longitude"], 2,
-                       {"type": "updated", "parking_id": pid, "car_id": row["car_id"]})
+                       {"type": "updated", "parking_id": pid, "car_id": car_id})
     return {"ok": True}
 
 

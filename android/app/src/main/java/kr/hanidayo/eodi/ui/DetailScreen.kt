@@ -30,6 +30,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Tune
@@ -96,7 +97,22 @@ fun DetailScreen(recordId: String, onBack: () -> Unit) {
     ) {
         Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "뒤로") }
-            Text(carName, style = MaterialTheme.typography.titleMedium)
+            Text(carName, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            var carMenu by remember { mutableStateOf(false) }
+            Box {
+                IconButton(onClick = { carMenu = true }) { Icon(Icons.Filled.DirectionsCar, "다른 차로 바꾸기") }
+                DropdownMenu(expanded = carMenu, onDismissRequest = { carMenu = false }) {
+                    Text("다른 차로 바꾸기", color = Eodi.colors.secondaryText, fontSize = 13.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+                    data.cars.forEach { c ->
+                        DropdownMenuItem(
+                            text = { Text(c.name) },
+                            onClick = { Store.changeCar(r.id, c.id); carMenu = false },
+                            trailingIcon = { if (c.id == r.carId) Icon(Icons.Filled.Check, null) },
+                        )
+                    }
+                }
+            }
         }
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).navigationBarsPadding(),

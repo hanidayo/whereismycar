@@ -23,7 +23,8 @@ object Store {
     val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; explicitNulls = false }
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    private const val GARAGE_RADIUS_M = 120f
+    /** 입구(=GPS가 끊기기 직전 위치) 기준. 경사지처럼 입구마다 높이가 다른 곳은 입구별로 따로 학습되게 좁게 잡음 */
+    private const val GARAGE_RADIUS_M = 60f
 
     private lateinit var appContext: Context
     private lateinit var file: File
@@ -137,8 +138,25 @@ object Store {
     }
 
     fun deleteCar(id: String) {
-        update { d -> d.copy(cars = d.cars.filterNot { it.id == id }, carDevices = d.carDevices - id) }
+        update { d -> d.copy(
+            cars = d.cars.filterNot { it.id == id }, carDevices = d.carDevices - id,
+            activityCarId = d.activityCarId.takeIf { it != id },
+        ) }
         push { it.deleteCar(id) }
+    }
+
+    fun setActivityCar(carId: String?) {
+        update { it.copy(activityCarId = carId) }
+        kr.hanidayo.eodi.drive.ActivityWatch.sync(appContext)
+    }
+
+    /** 다른 차로 잘못 기록됐을 때 */
+    fun changeCar(recordId: String, carId: String) {
+        val r = record(recordId) ?: return
+        if (r.carId == carId) return
+        val updated = update { d -> d.copy(records = d.records.map { if (it.id == recordId) it.copy(carId = carId) else it }) }
+            .records.firstOrNull { it.id == recordId } ?: return
+        if (updated.synced) push { it.patchParking(updated) }
     }
 
     fun carIdForDevice(address: String): String? =
@@ -251,7 +269,7 @@ object Store {
                     val i = records.indexOfFirst { it.id == rp.id }
                     if (i >= 0) {
                         records[i] = records[i].copy(
-                            level = rp.level, calibrated = rp.calibrated, pillarText = rp.pillarText,
+                            carId = rp.carId, level = rp.level, calibrated = rp.calibrated, pillarText = rp.pillarText,
                             ocrLevel = rp.ocrLevel, hasPhoto = rp.hasPhoto, synced = true,
                         )
                     } else {

@@ -22,6 +22,7 @@ class SyncException(val code: Int) : Exception(
 
 @Serializable
 private data class PatchBody(
+    @SerialName("car_id") val carId: String,
     val level: Int? = null,
     val calibrated: Boolean,
     @SerialName("pillar_text") val pillarText: String? = null,
@@ -84,7 +85,7 @@ class SyncClient private constructor(settings: SyncSettings) {
     }
 
     suspend fun patchParking(r: ParkingRecord) {
-        send("api/parkings/${r.id}", "PATCH", json(PatchBody(r.level, r.calibrated, r.pillarText, r.ocrLevel)))
+        send("api/parkings/${r.id}", "PATCH", json(PatchBody(r.carId, r.level, r.calibrated, r.pillarText, r.ocrLevel)))
     }
 
     suspend fun uploadPhoto(id: String, jpeg: ByteArray) {

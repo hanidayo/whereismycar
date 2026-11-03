@@ -23,6 +23,23 @@ struct ParkingDetailView: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle(store.carName(r.carID))
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Section("다른 차로 바꾸기") {
+                            ForEach(store.cars) { car in
+                                Button {
+                                    store.changeCar(recordID, to: car.id)
+                                } label: {
+                                    if car.id == r.carID { Label(car.name, systemImage: "checkmark") } else { Text(car.name) }
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "car.2")
+                    }
+                }
+            }
             .task { await store.fetchRemotePhoto(recordID) }
             .fullScreenCover(isPresented: $showCamera) {
                 CameraPicker { image in

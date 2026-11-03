@@ -11,6 +11,7 @@ class EodiApp : Application() {
         super.onCreate()
         Store.init(this)
         Notifications.createChannels(this)
+        kr.hanidayo.eodi.drive.ActivityWatch.sync(this)
         // google-services.json 없이 빌드하면 Firebase가 초기화되지 않음 → 푸시만 끄고 앱은 정상 동작
         if (FirebaseApp.getApps(this).isNotEmpty()) {
             runCatching {

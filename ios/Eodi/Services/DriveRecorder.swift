@@ -90,6 +90,14 @@ final class DriveRecorder: NSObject, ObservableObject {
     // MARK: - 운전 시작 / 주차
 
     func startDrive(carID: UUID) {
+        // 이미 기록 중이면(자동화가 두 번 실행되는 등) 기준점은 유지하고 차만 맞춤
+        if var s = state, Date().timeIntervalSince(s.startedAt) < 15 * 60 {
+            s.carID = carID
+            state = s
+            persist()
+            startSensors()
+            return
+        }
         state = DriveState(carID: carID, startedAt: Date())
         buffer.removeAll()
         persist()

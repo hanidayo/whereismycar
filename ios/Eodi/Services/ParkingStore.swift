@@ -9,6 +9,15 @@ private struct StoreData: Codable {
     var garages: [GarageProfile]
     var defaultFloorHeight: Double
     var sync: SyncSettings
+    /// 이 아이폰에서만 쓰는 CarPlay 장치 ↔ 차 연결 (예전 파일엔 없음)
+    var carPlayLinks: [CarPlayLink]?
+}
+
+/// CarPlay 오디오 장치(UID)를 어느 차로 볼지
+struct CarPlayLink: Codable, Equatable {
+    var uid: String
+    var name: String
+    var carID: UUID
 }
 
 @MainActor
@@ -21,9 +30,11 @@ final class ParkingStore: ObservableObject {
     @Published var defaultFloorHeight: Double { didSet { save() } }
     @Published var sync: SyncSettings { didSet { save() } }
     @Published private(set) var syncStatus: SyncStatus = .off
+    @Published private(set) var carPlayLinks: [CarPlayLink] = [] { didSet { save() } }
 
     /// 같은 주차장으로 볼 반경(m)
-    static let garageRadius: CLLocationDistance = 120
+    /// 입구(=GPS가 끊기기 직전 위치) 기준. 경사지처럼 입구마다 높이가 다른 곳은 입구별로 따로 학습되게 좁게 잡음
+    static let garageRadius: CLLocationDistance = 60
 
     private static let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     private static let fileURL = docs.appendingPathComponent("eodi-store.json")
@@ -34,6 +45,7 @@ final class ParkingStore: ObservableObject {
            let d = try? JSONDecoder().decode(StoreData.self, from: data) {
             cars = d.cars; records = d.records; garages = d.garages
             defaultFloorHeight = d.defaultFloorHeight; sync = d.sync
+            carPlayLinks = d.carPlayLinks ?? []
         } else {
             cars = [Car(name: "CarPlay 차", color: 0), Car(name: "블루투스 차", color: 1)]
             records = []; garages = []; defaultFloorHeight = 3.3; sync = SyncSettings()
@@ -47,6 +59,26 @@ final class ParkingStore: ObservableObject {
     func car(_ id: UUID) -> Car? { cars.first { $0.id == id } }
     func carName(_ id: UUID) -> String { car(id)?.name ?? "삭제된 차" }
     func carColor(_ id: UUID) -> Int { car(id)?.color ?? 0 }
+
+    // MARK: - CarPlay로 차 구분
+
+    func carPlayLink(for carID: UUID) -> CarPlayLink? { carPlayLinks.first { $0.carID == carID } }
+
+    /// 지금 연결된 CarPlay를 이 차로 지정 (한 장치는 한 차에만)
+    func linkCarPlay(_ info: CarPlayRoute.Info, to carID: UUID) {
+        carPlayLinks.removeAll { $0.uid == info.uid || $0.carID == carID }
+        carPlayLinks.append(CarPlayLink(uid: info.uid, name: info.name, carID: carID))
+    }
+
+    func unlinkCarPlay(carID: UUID) { carPlayLinks.removeAll { $0.carID == carID } }
+
+    /// 연결된 CarPlay에 맞는 차 (UID가 같거나, 없으면 이름이 같은 것)
+    func car(for info: CarPlayRoute.Info?) -> Car? {
+        guard let info else { return nil }
+        let link = carPlayLinks.first { $0.uid == info.uid }
+            ?? carPlayLinks.first { $0.name == info.name }
+        return link.flatMap { car($0.carID) }
+    }
 
     func current(for carID: UUID) -> ParkingRecord? {
         records.filter { $0.carID == carID }.max { $0.date < $1.date }
@@ -141,6 +173,14 @@ final class ParkingStore: ObservableObject {
         records[i] = r
         if r.synced { push { try await $0.patchParking(r) } }
         if let g = changedGarage { push { try await $0.putGarage(g) } }
+    }
+
+    /// 다른 차로 잘못 기록됐을 때
+    func changeCar(_ id: UUID, to carID: UUID) {
+        guard let i = records.firstIndex(where: { $0.id == id }), records[i].carID != carID else { return }
+        records[i].carID = carID
+        let r = records[i]
+        if r.synced { push { try await $0.patchParking(r) } }
     }
 
     func renameGarage(_ id: UUID, to name: String) {
@@ -285,7 +325,7 @@ final class ParkingStore: ObservableObject {
 
     private func save() {
         let d = StoreData(cars: cars, records: records, garages: garages,
-                          defaultFloorHeight: defaultFloorHeight, sync: sync)
+                          defaultFloorHeight: defaultFloorHeight, sync: sync, carPlayLinks: carPlayLinks)
         if let data = try? JSONEncoder().encode(d) { try? data.write(to: Self.fileURL, options: .atomic) }
     }
 }

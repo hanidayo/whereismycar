@@ -5,6 +5,8 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothManager
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -42,6 +44,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -66,6 +69,7 @@ import kr.hanidayo.eodi.data.Car
 import kr.hanidayo.eodi.data.FloorModel
 import kr.hanidayo.eodi.data.Store
 import kr.hanidayo.eodi.data.SyncSettings
+import kr.hanidayo.eodi.drive.ActivityWatch
 import java.util.Locale
 
 @Composable
@@ -178,7 +182,7 @@ fun SettingsScreen(onBack: () -> Unit) {
     }
 
     editing?.let { car ->
-        CarDialog(car, data.carDevices[car.id], onDismiss = { editing = null }, onDelete = {
+        CarDialog(car, data.carDevices[car.id], data.activityCarId == car.id, onDismiss = { editing = null }, onDelete = {
             Store.deleteCar(car.id); editing = null
         })
     }
@@ -193,11 +197,18 @@ private fun Hint(text: String) {
 @SuppressLint("MissingPermission")
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun CarDialog(car: Car, currentAddress: String?, onDismiss: () -> Unit, onDelete: () -> Unit) {
+private fun CarDialog(
+    car: Car, currentAddress: String?, activityOn: Boolean,
+    onDismiss: () -> Unit, onDelete: () -> Unit,
+) {
     val ctx = LocalContext.current
     var name by remember { mutableStateOf(car.name) }
     var color by remember { mutableStateOf(car.color) }
     var address by remember { mutableStateOf(currentAddress) }
+    var activity by remember { mutableStateOf(activityOn) }
+    val askActivity = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        activity = granted
+    }
 
     val canReadBt = Build.VERSION.SDK_INT < 31 ||
         ContextCompat.checkSelfPermission(ctx, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
@@ -251,13 +262,32 @@ private fun CarDialog(car: Car, currentAddress: String?, onDismiss: () -> Unit, 
                     }
                 }
                 Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("블루투스 없이도 기록", fontSize = 15.sp)
+                        Text("블루투스를 꺼 둔 날엔 휴대폰의 '차에 탐/내림' 감지로 이 차를 기록해요. (한 대만 지정)",
+                            color = Eodi.colors.secondaryText, fontSize = 12.sp)
+                    }
+                    Switch(checked = activity, onCheckedChange = { on ->
+                        if (on && !ActivityWatch.hasPermission(ctx)) {
+                            askActivity.launch(Manifest.permission.ACTIVITY_RECOGNITION)
+                        } else {
+                            activity = on
+                        }
+                    })
+                }
+                Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.Center, modifier = Modifier.fillMaxWidth()) {
                     FloorTile(-3, CarPalette.color(color), 64.dp)
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = { Store.updateCar(car.copy(name = name, color = color), address); onDismiss() }) { Text("저장") }
+            TextButton(onClick = {
+                Store.updateCar(car.copy(name = name, color = color), address)
+                if (activity != activityOn) Store.setActivityCar(if (activity) car.id else null)
+                onDismiss()
+            }) { Text("저장") }
         },
         dismissButton = {
             TextButton(onClick = onDelete) { Text("삭제", color = Color(0xFFFF3B30)) }

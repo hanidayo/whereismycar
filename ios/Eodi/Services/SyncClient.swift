@@ -51,6 +51,7 @@ struct RemoteState: Codable {
 }
 
 private struct ParkingPatchBody: Encodable {
+    var carId: String
     var level: Int?
     var calibrated: Bool
     var pillarText: String?
@@ -137,7 +138,7 @@ struct SyncClient {
     }
 
     func patchParking(_ r: ParkingRecord) async throws {
-        let body = ParkingPatchBody(level: r.level, calibrated: r.calibrated,
+        let body = ParkingPatchBody(carId: Self.key(r.carID), level: r.level, calibrated: r.calibrated,
                                     pillarText: r.pillarText, ocrLevel: r.ocrLevel)
         _ = try await send("api/parkings/\(Self.key(r.id))", method: "PATCH", json: body)
     }
@@ -183,6 +184,7 @@ extension ParkingRecord {
         pillarText = r.pillarText
         ocrLevel = r.ocrLevel
         hasRemotePhoto = r.hasPhoto ?? false
+        if let car = UUID(uuidString: r.carId) { carID = car }
     }
 }
 

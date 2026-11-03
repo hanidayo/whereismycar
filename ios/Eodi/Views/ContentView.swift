@@ -215,6 +215,10 @@ struct ManualControls: View {
                 .font(.caption).foregroundStyle(.secondary)
         }
         .card()
-        .onAppear { if selected == nil { selected = recorder.state?.carID ?? store.defaultCar?.id } }
+        .onAppear {
+            if selected == nil {
+                selected = recorder.state?.carID ?? store.car(for: CarPlayRoute.current())?.id ?? store.defaultCar?.id
+            }
+        }
     }
 }

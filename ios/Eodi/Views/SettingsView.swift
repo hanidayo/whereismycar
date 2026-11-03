@@ -85,6 +85,7 @@ struct SettingsView: View {
 struct CarEditView: View {
     @EnvironmentObject var store: ParkingStore
     @State private var car: Car
+    @State private var detected: CarPlayRoute.Info?
 
     init(car: Car) { _car = State(initialValue: car) }
 
@@ -112,6 +113,26 @@ struct CarEditView: View {
                 .padding(.vertical, 6)
             }
             Section {
+                if let link = store.carPlayLink(for: car.id) {
+                    LabeledContent("연결된 CarPlay", value: link.name)
+                } else {
+                    Text("아직 CarPlay를 지정하지 않았어요").foregroundStyle(.secondary)
+                }
+                LabeledContent("지금 감지된 CarPlay", value: detected?.name ?? "없음")
+                if let detected {
+                    Button("지금 연결된 CarPlay를 이 차로 지정") { store.linkCarPlay(detected, to: car.id) }
+                        .disabled(store.carPlayLink(for: car.id)?.uid == detected.uid)
+                }
+                if store.carPlayLink(for: car.id) != nil {
+                    Button("CarPlay 지정 해제", role: .destructive) { store.unlinkCarPlay(carID: car.id) }
+                }
+                Button("다시 감지") { detected = CarPlayRoute.current() }
+            } header: {
+                Text("CarPlay")
+            } footer: {
+                Text("이 차의 CarPlay에 연결된 상태에서 지정해 두면, 단축어 '운전 시작'에서 차를 비워 둬도 이 차로 기록해요. CarPlay 차가 여러 대일 때 필요해요.")
+            }
+            Section {
                 HStack {
                     Spacer()
                     FloorTile(level: -3, color: CarPalette.color(car.color), size: 72)
@@ -120,6 +141,7 @@ struct CarEditView: View {
             } header: { Text("미리보기") }
         }
         .navigationTitle(car.name.isEmpty ? "차" : car.name)
+        .onAppear { detected = CarPlayRoute.current() }
         .onDisappear { store.updateCar(car) }
     }
 }
@@ -151,11 +173,11 @@ struct GarageEditView: View {
 struct ShortcutGuideView: View {
     var body: some View {
         List {
-            Section("CarPlay 차") {
-                step(1, "단축어 앱 › 자동화 › + › CarPlay")
-                step(2, "'연결될 때' 선택 › '즉시 실행' 켜기")
-                step(3, "동작 추가 › 어디댔지 › '운전 시작' › 차를 목록에서 선택")
-                step(4, "같은 방법으로 '연결 해제될 때' › '주차 기록' 추가")
+            Section("CarPlay 차 (여러 대여도 자동화는 하나)") {
+                step(1, "차마다 CarPlay에 연결한 채로 앱 설정 › 차 › 'CarPlay' › '지금 연결된 CarPlay를 이 차로 지정'")
+                step(2, "단축어 앱 › 자동화 › + › CarPlay › '연결될 때' › '즉시 실행' 켜기")
+                step(3, "동작 추가 › 어디댔지 › '운전 시작' › 차는 비워 두기 (연결된 CarPlay로 자동 선택)")
+                step(4, "같은 방법으로 '연결 해제될 때' › '주차 기록' (차는 비워 두기)")
             }
             Section("블루투스 차") {
                 step(1, "아이폰 블루투스는 항상 켜두세요. 페어링만 돼 있으면 시동 걸 때 자동 연결돼요.")

@@ -88,6 +88,8 @@ data class AppData(
     /** 차 ID → 차 블루투스 기기 주소 */
     val carDevices: Map<String, String> = emptyMap(),
     val fcmToken: String? = null,
+    /** 블루투스 없이 "차에 탐/내림" 감지로 기록할 차 (null이면 끔) */
+    val activityCarId: String? = null,
 )
 
 sealed interface SyncStatus {
@@ -116,7 +118,7 @@ object FloorModel {
     fun coefficients(profile: GarageProfile?, defaultHeight: Double): Pair<Double, Double> {
         val fallback = 1.0 / defaultHeight to 0.0
         val samples = profile?.samples ?: return fallback
-        val last = samples.lastOrNull() ?: return fallback
+        if (samples.isEmpty()) return fallback
 
         if (samples.size >= 2) {
             val n = samples.size.toDouble()
@@ -129,11 +131,11 @@ object FloorModel {
                 if (a > 0 && 1 / a in 2.0..6.0) return a to (my - a * mx)
             }
         }
-        if (last.level != 0) {
-            val h = last.delta / last.level
-            if (h in 2.0..6.0) return 1 / h to 0.0
-        }
-        return 1.0 / defaultHeight to (last.level - last.delta / defaultHeight)
+        // 보정이 한두 번뿐이면 층 높이는 기본값으로 두고 "입구 높이 차이(오프셋)"만 학습.
+        // 예: 입구에서 1m 올라가서 B1인 주차장 → delta +1 = B1 로 바로 맞춰짐
+        val a = 1.0 / defaultHeight
+        val b = samples.map { it.level - it.delta * a }.average()
+        return a to b
     }
 
     fun predict(delta: Double, profile: GarageProfile?, defaultHeight: Double): Int {

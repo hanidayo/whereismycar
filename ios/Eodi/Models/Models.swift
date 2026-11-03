@@ -69,7 +69,7 @@ enum FloorModel {
     /// level = a * delta + b
     static func coefficients(profile: GarageProfile?, defaultHeight: Double) -> (a: Double, b: Double) {
         let fallback = (a: 1.0 / defaultHeight, b: 0.0)
-        guard let samples = profile?.samples, let last = samples.last else { return fallback }
+        guard let samples = profile?.samples, !samples.isEmpty else { return fallback }
 
         if samples.count >= 2 {
             let n = Double(samples.count)
@@ -82,11 +82,11 @@ enum FloorModel {
                 if a > 0, (2.0...6.0).contains(1 / a) { return (a, my - a * mx) }
             }
         }
-        if last.level != 0 {
-            let h = last.delta / Double(last.level)
-            if (2.0...6.0).contains(h) { return (1 / h, 0) }
-        }
-        return (1.0 / defaultHeight, Double(last.level) - last.delta / defaultHeight)
+        // 보정이 한두 번뿐이면 층 높이는 기본값으로 두고 "입구 높이 차이(오프셋)"만 학습.
+        // 예: 입구에서 1m 올라가서 B1인 주차장 → delta +1 = B1 로 바로 맞춰짐
+        let a = 1.0 / defaultHeight
+        let b = samples.map { Double($0.level) - $0.delta * a }.reduce(0, +) / Double(samples.count)
+        return (a, b)
     }
 
     static func predict(delta: Double, profile: GarageProfile?, defaultHeight: Double) -> Int {
