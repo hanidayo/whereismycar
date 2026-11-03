@@ -32,6 +32,7 @@ struct RemoteParking: Codable {
     var pillarText: String?
     var ocrLevel: Int?
     var hasPhoto: Bool?
+    var course: Double?
 }
 
 struct RemoteSample: Codable { var recordId: String; var delta: Double; var level: Int }
@@ -41,6 +42,7 @@ struct RemoteGarage: Codable {
     var latitude: Double
     var longitude: Double
     var name: String?
+    var course: Double?
     var samples: [RemoteSample]
 }
 
@@ -133,7 +135,7 @@ struct SyncClient {
                                  date: r.date, latitude: r.latitude, longitude: r.longitude,
                                  accuracy: r.accuracy, deltaMeters: r.deltaMeters, level: r.level,
                                  calibrated: r.calibrated, pillarText: r.pillarText,
-                                 ocrLevel: r.ocrLevel, hasPhoto: nil)
+                                 ocrLevel: r.ocrLevel, hasPhoto: nil, course: r.course)
         _ = try await send("api/parkings", method: "POST", json: body)
     }
 
@@ -154,7 +156,7 @@ struct SyncClient {
 
     func putGarage(_ g: GarageProfile) async throws {
         let body = RemoteGarage(id: Self.key(g.id), latitude: g.latitude, longitude: g.longitude,
-                                name: g.name,
+                                name: g.name, course: g.course,
                                 samples: g.samples.map {
                                     RemoteSample(recordId: Self.key($0.recordID), delta: $0.delta, level: $0.level)
                                 })
@@ -175,6 +177,7 @@ extension ParkingRecord {
         longitude = r.longitude
         accuracy = r.accuracy
         deltaMeters = r.deltaMeters
+        course = r.course
         synced = true
     }
 
@@ -194,6 +197,6 @@ extension GarageProfile {
         self.init(id: id, latitude: g.latitude, longitude: g.longitude, name: g.name,
                   samples: g.samples.compactMap { s in
                       UUID(uuidString: s.recordId).map { GarageSample(recordID: $0, delta: s.delta, level: s.level) }
-                  })
+                  }, course: g.course)
     }
 }

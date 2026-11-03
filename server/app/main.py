@@ -59,6 +59,12 @@ _db.executescript(
         samples TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL);
     """
 )
+# 진입 방향(도) — 같은 주차장의 입구 구분용. 예전 DB에는 없어서 추가
+for _table in ("parkings", "garages"):
+    _cols = {r[1] for r in _db.execute(f"PRAGMA table_info({_table})")}
+    if "course" not in _cols:
+        _db.execute(f"ALTER TABLE {_table} ADD COLUMN course REAL")
+_db.commit()
 
 
 def now_iso() -> str:
@@ -100,12 +106,13 @@ def parking_out(r: sqlite3.Row) -> dict:
         "delta_meters": r["delta_meters"], "level": r["level"],
         "calibrated": bool(r["calibrated"]), "pillar_text": r["pillar_text"],
         "ocr_level": r["ocr_level"], "has_photo": bool(r["has_photo"]),
+        "course": r["course"],
     }
 
 
 def garage_out(r: sqlite3.Row) -> dict:
     return {"id": r["id"], "latitude": r["latitude"], "longitude": r["longitude"],
-            "name": r["name"], "samples": json.loads(r["samples"])}
+            "name": r["name"], "course": r["course"], "samples": json.loads(r["samples"])}
 
 
 # ---------------------------------------------------------------- 알림 (FCM + 선택 ntfy)
@@ -236,6 +243,7 @@ class ParkingIn(BaseModel):
     calibrated: bool = False
     pillar_text: Optional[str] = None
     ocr_level: Optional[int] = None
+    course: Optional[float] = None
 
 
 class ParkingPatch(BaseModel):
@@ -256,6 +264,7 @@ class GarageIn(BaseModel):
     latitude: float
     longitude: float
     name: Optional[str] = None
+    course: Optional[float] = None
     samples: list[GarageSample] = []
 
 
@@ -347,14 +356,14 @@ def post_parking(body: ParkingIn, tasks: BackgroundTasks):
         existed = _db.execute("SELECT 1 FROM parkings WHERE id=?", (pid,)).fetchone()
         _db.execute(
             """INSERT INTO parkings(id, car_id, member, date, latitude, longitude, accuracy,
-                   delta_meters, level, calibrated, pillar_text, ocr_level, updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+                   delta_meters, level, calibrated, pillar_text, ocr_level, course, updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(id) DO UPDATE SET level=excluded.level,
                    calibrated=excluded.calibrated, pillar_text=excluded.pillar_text,
                    ocr_level=excluded.ocr_level, updated_at=excluded.updated_at""",
             (pid, cid, body.member.strip()[:20] or "가족", date, body.latitude, body.longitude,
              body.accuracy, body.delta_meters, body.level, int(body.calibrated),
-             body.pillar_text, body.ocr_level, now_iso()))
+             body.pillar_text, body.ocr_level, body.course, now_iso()))
     if not existed:
         msg = f"{body.member}님이 {local_time(date)}에 주차했어요"
         if body.pillar_text:
@@ -432,11 +441,11 @@ def put_garage(garage_id: str, body: GarageIn):
     samples = [s.model_dump() | {"record_id": nid(s.record_id)} for s in body.samples][-10:]
     with _lock, _db:
         _db.execute(
-            """INSERT INTO garages(id, latitude, longitude, name, samples, updated_at)
-               VALUES(?,?,?,?,?,?)
+            """INSERT INTO garages(id, latitude, longitude, name, course, samples, updated_at)
+               VALUES(?,?,?,?,?,?,?)
                ON CONFLICT(id) DO UPDATE SET name=excluded.name, samples=excluded.samples,
-               updated_at=excluded.updated_at""",
-            (nid(garage_id), body.latitude, body.longitude, body.name,
+               course=COALESCE(excluded.course, garages.course), updated_at=excluded.updated_at""",
+            (nid(garage_id), body.latitude, body.longitude, body.name, body.course,
              json.dumps(samples, ensure_ascii=False), now_iso()))
     return {"ok": True}
 

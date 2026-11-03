@@ -49,6 +49,8 @@ data class DriveState(
     val refLon: Double? = null,
     val refAccuracy: Double? = null,
     val refTime: Long? = null,
+    /** 기준점에서 차가 향하던 방향(도) — 입구 구분용 */
+    val refCourse: Double? = null,
     val lastLat: Double? = null,
     val lastLon: Double? = null,
     val lastAccuracy: Double? = null,
@@ -263,6 +265,7 @@ class DriveService : Service(), SensorEventListener {
             s = s.copy(
                 refLat = loc.latitude, refLon = loc.longitude,
                 refAccuracy = loc.accuracy.toDouble(), refTime = loc.time,
+                refCourse = if (loc.hasBearing() && loc.speed > 1.5f) loc.bearing.toDouble() else s.refCourse,
                 refPressure = pressureNear(loc.time - LOOKBACK_MS) ?: s.refPressure,
                 peakPressure = null, // 아직 지상 → 최저점 다시 추적
             )
@@ -315,6 +318,7 @@ class DriveService : Service(), SensorEventListener {
         var lat = s?.refLat ?: s?.lastLat
         var lon = s?.refLon ?: s?.lastLon
         var acc = if (s?.refLat != null) s.refAccuracy else s?.lastAccuracy
+        val course = if (s?.refLat != null) s.refCourse else null
         if (lat == null) {
             val last = runCatching { suspendCancellableCoroutine<Location?> { c ->
                 fused.lastLocation.addOnSuccessListener { c.resume(it) }.addOnFailureListener { c.resume(null) }
@@ -322,7 +326,7 @@ class DriveService : Service(), SensorEventListener {
             lat = last?.latitude; lon = last?.longitude; acc = last?.accuracy?.toDouble()
         }
 
-        val record = Store.recordParking(carId, lat, lon, acc, delta)
+        val record = Store.recordParking(carId, lat, lon, acc, delta, course)
         // 가족 공유 중이면 서버가 FCM으로 모두에게(나 포함) 알림 → 로컬 알림 생략
         if (auto || !Store.data.value.sync.isConfigured) Notifications.parkedLocal(this, record, auto)
         shutdown()

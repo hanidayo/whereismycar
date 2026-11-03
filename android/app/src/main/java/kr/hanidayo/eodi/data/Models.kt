@@ -35,6 +35,8 @@ data class ParkingRecord(
     @SerialName("pillar_text") val pillarText: String? = null,
     @SerialName("ocr_level") val ocrLevel: Int? = null,
     @SerialName("has_photo") val hasPhoto: Boolean = false,
+    /** 입구로 들어갈 때 차가 향하던 방향(도, 0=북). 같은 주차장의 입구 구분용 */
+    val course: Double? = null,
     // ↓ 이 기기 전용
     @SerialName("garage_id") val garageId: String? = null,
     @SerialName("photo_file") val photoFile: String? = null,
@@ -60,7 +62,15 @@ data class GarageProfile(
     val longitude: Double,
     val name: String? = null,
     val samples: List<GarageSample> = emptyList(),
+    /** 이 입구의 진입 방향(도). 가까운 두 입구도 방향으로 구분 */
+    val course: Double? = null,
 )
+
+/** 두 방향(도)의 차이 0~180 */
+fun angleDifference(a: Double, b: Double): Double {
+    val d = kotlin.math.abs(a - b) % 360.0
+    return minOf(d, 360.0 - d)
+}
 
 @Serializable
 data class SyncSettings(

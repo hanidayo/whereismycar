@@ -93,11 +93,19 @@ final class ParkingStore: ObservableObject {
         return s
     }
 
-    func garage(near c: CLLocationCoordinate2D) -> GarageProfile? {
+    /// 진입 방향이 이만큼 넘게 다르면 가까워도 다른 입구로 봄
+    static let entranceCourseTolerance: Double = 70
+
+    /// 같은 입구(가까운 위치 + 비슷한 진입 방향)로 학습된 주차장
+    func garage(near c: CLLocationCoordinate2D, course: Double?) -> GarageProfile? {
         let here = CLLocation(latitude: c.latitude, longitude: c.longitude)
         return garages
             .map { ($0, $0.location.distance(from: here)) }
             .filter { $0.1 <= Self.garageRadius }
+            .filter { g, _ in
+                guard let course, let gc = g.course else { return true }
+                return angleDifference(course, gc) <= Self.entranceCourseTolerance
+            }
             .min { $0.1 < $1.1 }?.0
     }
 
@@ -134,13 +142,14 @@ final class ParkingStore: ObservableObject {
     // MARK: - 주차 기록
 
     func recordParking(carID: UUID, coordinate: CLLocationCoordinate2D?,
-                       accuracy: Double?, delta: Double?) -> ParkingRecord {
+                       accuracy: Double?, delta: Double?, course: Double? = nil) -> ParkingRecord {
         var r = ParkingRecord(carID: carID, member: memberName, date: Date())
         r.latitude = coordinate?.latitude
         r.longitude = coordinate?.longitude
         r.accuracy = accuracy
         r.deltaMeters = delta
-        let profile = coordinate.flatMap { garage(near: $0) }
+        r.course = course
+        let profile = coordinate.flatMap { garage(near: $0, course: course) }
         r.garageID = profile?.id
         if let delta {
             r.level = FloorModel.predict(delta: delta, profile: profile, defaultHeight: defaultFloorHeight)
@@ -161,8 +170,9 @@ final class ParkingStore: ObservableObject {
         var changedGarage: GarageProfile?
         if let delta = r.deltaMeters, let c = r.coordinate {
             let gi = garages.firstIndex { $0.id == r.garageID }
-                ?? garage(near: c).flatMap { g in garages.firstIndex { $0.id == g.id } }
-            var g = gi.map { garages[$0] } ?? GarageProfile(latitude: c.latitude, longitude: c.longitude)
+                ?? garage(near: c, course: r.course).flatMap { g in garages.firstIndex { $0.id == g.id } }
+            var g = gi.map { garages[$0] } ?? GarageProfile(latitude: c.latitude, longitude: c.longitude, course: r.course)
+            if g.course == nil { g.course = r.course }
             g.samples.removeAll { $0.recordID == id }
             g.samples.append(GarageSample(recordID: id, delta: delta, level: level))
             if g.samples.count > 10 { g.samples.removeFirst(g.samples.count - 10) }

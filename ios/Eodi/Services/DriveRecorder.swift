@@ -18,6 +18,8 @@ struct DriveState: Codable {
     var refLon: Double?
     var refAccuracy: Double?
     var refDate: Date?
+    /// 기준점에서 차가 향하던 방향(도) — 입구 구분용
+    var refCourse: Double?
     var lastLat: Double?
     var lastLon: Double?
     var lastAccuracy: Double?
@@ -125,8 +127,9 @@ final class DriveRecorder: NSObject, ObservableObject {
 
         var coordinate: CLLocationCoordinate2D?
         var accuracy: Double?
+        var course: Double?
         if let lat = s?.refLat, let lon = s?.refLon {
-            coordinate = .init(latitude: lat, longitude: lon); accuracy = s?.refAccuracy
+            coordinate = .init(latitude: lat, longitude: lon); accuracy = s?.refAccuracy; course = s?.refCourse
         } else if let lat = s?.lastLat, let lon = s?.lastLon {
             coordinate = .init(latitude: lat, longitude: lon); accuracy = s?.lastAccuracy
         } else if let loc = locationManager.location {
@@ -134,7 +137,7 @@ final class DriveRecorder: NSObject, ObservableObject {
         }
 
         stopDrive()
-        let record = store.recordParking(carID: id, coordinate: coordinate, accuracy: accuracy, delta: delta)
+        let record = store.recordParking(carID: id, coordinate: coordinate, accuracy: accuracy, delta: delta, course: course)
         // 가족 공유를 쓰면 ntfy가 모두에게(나 포함) 알리므로 로컬 알림은 생략
         if auto {
             Notifier.post(title: "자동으로 주차 기록 · \(record.levelName) · \(store.carName(id))",
@@ -228,6 +231,7 @@ final class DriveRecorder: NSObject, ObservableObject {
             s.refLon = loc.coordinate.longitude
             s.refAccuracy = loc.horizontalAccuracy
             s.refDate = loc.timestamp
+            if loc.course >= 0, loc.speed > 1.5 { s.refCourse = loc.course }
             if let p = pressure(near: loc.timestamp.addingTimeInterval(-Self.lookback)) {
                 s.refPressure = p
             }

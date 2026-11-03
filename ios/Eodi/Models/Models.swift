@@ -28,6 +28,8 @@ struct ParkingRecord: Codable, Identifiable {
     var pillarText: String?
     var ocrLevel: Int?
     var synced = false
+    /// 입구로 들어갈 때 차가 향하던 방향(도, 0=북). 같은 주차장의 입구 구분용
+    var course: Double?
 
     var coordinate: CLLocationCoordinate2D? {
         guard let latitude, let longitude else { return nil }
@@ -50,8 +52,16 @@ struct GarageProfile: Codable, Identifiable {
     var longitude: Double
     var name: String?
     var samples: [GarageSample] = []
+    /// 이 입구의 진입 방향(도). 가까운 두 입구도 방향으로 구분
+    var course: Double?
 
     var location: CLLocation { CLLocation(latitude: latitude, longitude: longitude) }
+}
+
+/// 두 방향(도)의 차이 0~180
+func angleDifference(_ a: Double, _ b: Double) -> Double {
+    let d = abs(a - b).truncatingRemainder(dividingBy: 360)
+    return min(d, 360 - d)
 }
 
 enum Level {

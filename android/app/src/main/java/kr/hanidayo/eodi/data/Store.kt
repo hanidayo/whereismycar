@@ -75,11 +75,19 @@ object Store {
         r.pillarText?.let { append(" · $it") }
     }
 
-    private fun garageNear(lat: Double, lon: Double): GarageProfile? {
+    /** 진입 방향이 이만큼 넘게 다르면 가까워도 다른 입구로 봄 */
+    private const val ENTRANCE_COURSE_TOLERANCE = 70.0
+
+    /** 같은 입구(가까운 위치 + 비슷한 진입 방향)로 학습된 주차장 */
+    private fun garageNear(lat: Double, lon: Double, course: Double?): GarageProfile? {
         val out = FloatArray(1)
         return _data.value.garages
             .map { g -> Location.distanceBetween(lat, lon, g.latitude, g.longitude, out); g to out[0] }
             .filter { it.second <= GARAGE_RADIUS_M }
+            .filter { (g, _) ->
+                val gc = g.course
+                course == null || gc == null || angleDifference(course, gc) <= ENTRANCE_COURSE_TOLERANCE
+            }
             .minByOrNull { it.second }?.first
     }
 
@@ -164,11 +172,13 @@ object Store {
 
     // ---------------------------------------------------------------- 주차 기록
 
-    fun recordParking(carId: String, lat: Double?, lon: Double?, accuracy: Double?, delta: Double?): ParkingRecord {
-        val profile = if (lat != null && lon != null) garageNear(lat, lon) else null
+    fun recordParking(
+        carId: String, lat: Double?, lon: Double?, accuracy: Double?, delta: Double?, course: Double? = null,
+    ): ParkingRecord {
+        val profile = if (lat != null && lon != null) garageNear(lat, lon, course) else null
         val record = ParkingRecord(
             carId = carId, member = memberName,
-            latitude = lat, longitude = lon, accuracy = accuracy, deltaMeters = delta,
+            latitude = lat, longitude = lon, accuracy = accuracy, deltaMeters = delta, course = course,
             level = delta?.let { FloorModel.predict(it, profile, _data.value.defaultFloorHeight) },
             garageId = profile?.id,
         )
@@ -185,8 +195,9 @@ object Store {
         val delta = r.deltaMeters
         if (delta != null && r.latitude != null && r.longitude != null) {
             val existing = _data.value.garages.firstOrNull { it.id == r.garageId }
-                ?: garageNear(r.latitude!!, r.longitude!!)
-            val base = existing ?: GarageProfile(latitude = r.latitude!!, longitude = r.longitude!!)
+                ?: garageNear(r.latitude!!, r.longitude!!, r.course)
+            val found = existing ?: GarageProfile(latitude = r.latitude!!, longitude = r.longitude!!, course = r.course)
+            val base = if (found.course == null) found.copy(course = r.course) else found
             val samples = (base.samples.filterNot { it.recordId == id } + GarageSample(id, delta, level)).takeLast(10)
             changed = base.copy(samples = samples)
             r = r.copy(garageId = changed.id)
