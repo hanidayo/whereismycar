@@ -15,13 +15,27 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
-      - name: Build debug APK (google-services.json 없이)
+      - name: 고정 서명 키 준비 (Secrets에 있을 때만)
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > android/eodi-release.jks
+            echo "고정 키로 서명합니다."
+          else
+            echo "::warning::ANDROID_KEYSTORE_B64 비밀값이 없어 임시 디버그 키로 서명합니다 (업데이트 시 재설치 필요)."
+          fi
+      - name: Build APK (google-services.json 없이)
         working-directory: android
-        run: ./gradlew --no-daemon assembleDebug
+        env:
+          EODI_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          ./gradlew --no-daemon assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk ../eodi.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: eodi-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: eodi-apk
+          path: eodi.apk
 
   ios:
     runs-on: macos-15
@@ -32,10 +46,46 @@ jobs:
       - name: Generate project
         working-directory: ios
         run: xcodegen generate
-      - name: Compile (서명 없이)
+      - name: Build (서명 없이)
         working-directory: ios
         run: |
           xcodebuild -version
-          xcodebuild -project Eodi.xcodeproj -scheme Eodi -configuration Debug \
-            -destination 'generic/platform=iOS' -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+          xcodebuild -project Eodi.xcodeproj -scheme Eodi -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+      - name: 서명 안 된 IPA 만들기 (Sideloadly/AltStore가 설치하면서 서명)
+        working-directory: ios
+        run: |
+          rm -rf Payload && mkdir Payload
+          cp -R build/Build/Products/Release-iphoneos/Eodi.app Payload/
+          zip -qry ../Eodi.ipa Payload
+          ls -la ../Eodi.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eodi-ipa
+          path: Eodi.ipa
+
+  # main에 푸시할 때마다 'latest' 릴리스의 파일을 최신으로 교체 → 고정 링크로 바로 내려받기
+  release:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [android, ios]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: latest 릴리스 갱신
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -la
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create latest eodi.apk Eodi.ipa \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "최신 빌드 (${GITHUB_SHA::7})" \
+            --notes "main의 최신 커밋으로 자동 빌드된 파일입니다.
+          - eodi.apk: 갤럭시에서 바로 설치
+          - Eodi.ipa: 서명 안 된 아이폰 앱 → Sideloadly/AltStore로 설치(무료 Apple ID는 7일마다 재설치)"

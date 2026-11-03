@@ -24,10 +24,31 @@ android {
         versionName = "0.2"
     }
 
+    // 가족 배포용 고정 서명 키: android/eodi-release.jks + 비밀번호
+    //   (CI: EODI_KEYSTORE_PASSWORD 환경변수 / 맥: android/keystore-password.txt)
+    // 키가 없으면 기기마다 다른 기본 디버그 키로 서명됨 → 업데이트 시 재설치 필요
+    val ksFile = rootProject.file("eodi-release.jks")
+    val ksPass = System.getenv("EODI_KEYSTORE_PASSWORD")?.takeIf { it.isNotBlank() }
+        ?: rootProject.file("keystore-password.txt").takeIf { it.exists() }?.readText()?.trim()
+    if (ksFile.exists() && ksPass != null) {
+        signingConfigs.create("family") {
+            storeFile = ksFile
+            storePassword = ksPass
+            keyAlias = "eodi"
+            keyPassword = ksPass
+        }
+    } else {
+        logger.warn("⚠️  고정 서명 키 없음 → 기본 디버그 키로 서명합니다.")
+    }
+    val family = signingConfigs.findByName("family")
+
     buildTypes {
+        debug {
+            if (family != null) signingConfig = family
+        }
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug") // 가족 배포용: 디버그 키로 서명
+            signingConfig = family ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {

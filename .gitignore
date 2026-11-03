@@ -18,3 +18,7 @@ ios/build/
 build-logs/
 *.apk
 .tools/
+*.jks
+android/keystore-password.txt
+keystore-base64.txt
+*.ipa
