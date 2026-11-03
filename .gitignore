@@ -17,3 +17,4 @@ __pycache__/
 ios/build/
 build-logs/
 *.apk
+.tools/

@@ -114,11 +114,23 @@ check_ios() {
              "그다음: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer"
     fi
 
-    if command -v xcodegen >/dev/null 2>&1; then ok "xcodegen $(xcodegen --version 2>/dev/null | awk '{print $NF}')"
-    elif command -v brew >/dev/null 2>&1; then need "xcodegen이 없어요" "brew install xcodegen"
-    else need "xcodegen이 없어요 (Homebrew부터 필요)" \
-              '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"' \
-              "brew install xcodegen"; fi
+    XCODEGEN=$(command -v xcodegen)
+    local local_xg="$ROOT/.tools/xcodegen/bin/xcodegen"
+    if [ -z "$XCODEGEN" ] && [ ! -x "$local_xg" ]; then
+        echo "    xcodegen 내려받는 중 (GitHub 공식 릴리스)…"
+        mkdir -p "$ROOT/.tools" && rm -rf "$ROOT/.tools/xcodegen"
+        curl -fsSL -o "$ROOT/.tools/xcodegen.zip" \
+            https://github.com/yonaskolb/XcodeGen/releases/latest/download/xcodegen.zip \
+          && unzip -q -o "$ROOT/.tools/xcodegen.zip" -d "$ROOT/.tools" \
+          && rm -f "$ROOT/.tools/xcodegen.zip"
+        xattr -dr com.apple.quarantine "$ROOT/.tools/xcodegen" 2>/dev/null
+    fi
+    [ -z "$XCODEGEN" ] && [ -x "$local_xg" ] && XCODEGEN="$local_xg"
+    if [ -n "$XCODEGEN" ] && "$XCODEGEN" --version >/dev/null 2>&1; then
+        ok "xcodegen $("$XCODEGEN" --version 2>/dev/null | awk '{print $NF}')"
+    else
+        need "xcodegen을 준비하지 못했어요" "Homebrew 설치 후: brew install xcodegen"
+    fi
 
     TEAM=$(find_team)
     if [ -n "$TEAM" ]; then ok "서명 팀: $TEAM"
@@ -170,7 +182,7 @@ build_ios() {
     bold "▶ 아이폰 빌드·설치"
     cd "$ROOT/ios" || return 1
 
-    xcodegen generate 2>&1 | tee "$LOGS/xcodegen.log" || { red "✗ xcodegen 실패"; return 1; }
+    "$XCODEGEN" generate 2>&1 | tee "$LOGS/xcodegen.log" || { red "✗ xcodegen 실패"; return 1; }
 
     local line udid name
     line=$(pick_device)
