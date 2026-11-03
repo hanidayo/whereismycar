@@ -21,8 +21,11 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -49,6 +52,12 @@ data class DriveState(
     val lastLat: Double? = null,
     val lastLon: Double? = null,
     val lastAccuracy: Double? = null,
+    /** 마지막으로 의미 있게(MOVE_THRESHOLD_M 이상) 움직인 위치·시각 — 자동 종료 판단용 */
+    val moveLat: Double? = null,
+    val moveLon: Double? = null,
+    val lastMoveAt: Long? = null,
+    /** 기준점 이후 가장 높은 기압(hPa, =가장 낮은 위치). 자동 종료 때 층 계산에 씀 */
+    val peakPressure: Double? = null,
 )
 
 data class LiveDrive(val state: DriveState, val pressure: Double?, val hasBarometer: Boolean) {
@@ -78,6 +87,12 @@ class DriveService : Service(), SensorEventListener {
         private const val GOOD_ACCURACY = 25f
         /** 기준 기압은 마지막 GPS 시점보다 몇 초 앞의 값(경사로 진입 전) */
         private const val LOOKBACK_MS = 5_000L
+        /** 이만큼 움직이지 않으면(지하에서 GPS가 안 잡히는 시간 포함) 주차한 것으로 보고 자동 종료 */
+        private const val IDLE_LIMIT_MS = 30 * 60_000L
+        /** 운전 시작 후 이 시간이 지나면 무조건 자동 종료(배터리 보호) */
+        private const val MAX_DRIVE_MS = 8 * 60 * 60_000L
+        /** 이 거리(m) 이상 움직여야 "움직였다"로 봄 */
+        private const val MOVE_THRESHOLD_M = 100f
 
         private val _live = MutableStateFlow<LiveDrive?>(null)
         val live: StateFlow<LiveDrive?> = _live
@@ -102,6 +117,8 @@ class DriveService : Service(), SensorEventListener {
     private var latestPressure: Pair<Long, Double>? = null
     private val buffer = ArrayDeque<Pair<Long, Double>>()
     private var running = false
+    private var watchdog: Job? = null
+    private var autoParking = false
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
@@ -131,7 +148,7 @@ class DriveService : Service(), SensorEventListener {
         }
         when (intent?.action) {
             ACTION_START -> begin(carId ?: Store.defaultCar?.id ?: return stopAndReturn())
-            ACTION_PARK -> scope.launch { finishParking(carId) }
+            ACTION_PARK -> scope.launch { finishParking(carId, auto = false) }
             else -> if (state != null) startSensors() else return stopAndReturn() // 시스템이 재시작한 경우
         }
         return START_STICKY
@@ -158,6 +175,12 @@ class DriveService : Service(), SensorEventListener {
         }
         val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1_000L).build()
         runCatching { fused.requestLocationUpdates(req, locationCallback, Looper.getMainLooper()) }
+        watchdog = scope.launch {
+            while (isActive) {
+                delay(60_000)
+                checkAutoStop()
+            }
+        }
         publish()
     }
 
@@ -166,6 +189,20 @@ class DriveService : Service(), SensorEventListener {
         running = false
         sensors.unregisterListener(this)
         fused.removeLocationUpdates(locationCallback)
+        watchdog?.cancel()
+        watchdog = null
+    }
+
+    /** 블루투스 해제를 놓쳐도 GPS가 계속 켜져 있지 않게 하는 안전장치 */
+    private fun checkAutoStop() {
+        val s = state ?: return
+        if (autoParking) return
+        val now = System.currentTimeMillis()
+        val idle = now - (s.lastMoveAt ?: s.startedAt)
+        val total = now - s.startedAt
+        if (idle < IDLE_LIMIT_MS && total < MAX_DRIVE_MS) return
+        autoParking = true
+        scope.launch { finishParking(s.carId, auto = true) }
     }
 
     override fun onSensorChanged(event: SensorEvent) {
@@ -174,6 +211,11 @@ class DriveService : Service(), SensorEventListener {
         latestPressure = now to hPa
         buffer.addLast(now to hPa)
         while (buffer.isNotEmpty() && buffer.first().first < now - 180_000) buffer.removeFirst()
+        val s = state
+        if (s?.refPressure != null && hPa > (s.peakPressure ?: Double.NEGATIVE_INFINITY)) {
+            state = s.copy(peakPressure = hPa)
+            saveState()
+        }
         publish()
     }
 
@@ -182,17 +224,31 @@ class DriveService : Service(), SensorEventListener {
     private fun onLocation(loc: Location) {
         var s = state ?: return
         s = s.copy(lastLat = loc.latitude, lastLon = loc.longitude, lastAccuracy = loc.accuracy.toDouble())
+        if (loc.hasAccuracy() && loc.accuracy <= 50f) {
+            val mLat = s.moveLat
+            val mLon = s.moveLon
+            val moved = if (mLat != null && mLon != null) {
+                val out = FloatArray(1)
+                Location.distanceBetween(mLat, mLon, loc.latitude, loc.longitude, out)
+                out[0]
+            } else Float.MAX_VALUE
+            if (moved >= MOVE_THRESHOLD_M) {
+                s = s.copy(moveLat = loc.latitude, moveLon = loc.longitude, lastMoveAt = System.currentTimeMillis())
+            }
+        }
         val age = System.currentTimeMillis() - loc.time
         if (loc.hasAccuracy() && loc.accuracy <= GOOD_ACCURACY && age < 10_000) {
             s = s.copy(
                 refLat = loc.latitude, refLon = loc.longitude,
                 refAccuracy = loc.accuracy.toDouble(), refTime = loc.time,
                 refPressure = pressureNear(loc.time - LOOKBACK_MS) ?: s.refPressure,
+                peakPressure = null, // 아직 지상 → 최저점 다시 추적
             )
         }
         state = s
         saveState()
         publish()
+        checkAutoStop()
     }
 
     private fun pressureNear(time: Long): Double? =
@@ -218,14 +274,21 @@ class DriveService : Service(), SensorEventListener {
     }
 
     @SuppressLint("MissingPermission")
-    private suspend fun finishParking(requestedCar: String?) {
+    /** auto: 안전장치가 부른 경우(주차 후 한참 지났을 수 있음) */
+    private suspend fun finishParking(requestedCar: String?, auto: Boolean) {
         val s = state
         val carId = requestedCar ?: s?.carId ?: Store.defaultCar?.id
         if (carId == null) { shutdown(); return }
 
         val now = currentPressure()
         val ref = s?.refPressure
-        val delta = if (ref != null && now != null) Altitude.meters(now) - Altitude.meters(ref) else null
+        var delta = if (ref != null && now != null) Altitude.meters(now) - Altitude.meters(ref) else null
+        // 자동 종료는 사람이 위층으로 갔을 수 있음 → 입구 이후 가장 낮았던 지점을 씀
+        val peak = s?.peakPressure
+        if (auto && ref != null && peak != null) {
+            val lowest = Altitude.meters(peak) - Altitude.meters(ref)
+            if (delta == null || lowest < delta) delta = lowest
+        }
 
         var lat = s?.refLat ?: s?.lastLat
         var lon = s?.refLon ?: s?.lastLon
@@ -239,7 +302,7 @@ class DriveService : Service(), SensorEventListener {
 
         val record = Store.recordParking(carId, lat, lon, acc, delta)
         // 가족 공유 중이면 서버가 FCM으로 모두에게(나 포함) 알림 → 로컬 알림 생략
-        if (!Store.data.value.sync.isConfigured) Notifications.parkedLocal(this, record)
+        if (auto || !Store.data.value.sync.isConfigured) Notifications.parkedLocal(this, record, auto)
         shutdown()
     }
 
@@ -248,6 +311,7 @@ class DriveService : Service(), SensorEventListener {
         state = null
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(KEY_STATE).apply()
         _live.value = null
+        autoParking = false
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
     }

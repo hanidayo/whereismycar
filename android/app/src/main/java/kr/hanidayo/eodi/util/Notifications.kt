@@ -66,11 +66,15 @@ object Notifications {
     }
 
     /** 가족 공유를 안 쓸 때 이 기기에만 */
-    fun parkedLocal(context: Context, r: ParkingRecord) {
+    fun parkedLocal(context: Context, r: ParkingRecord, auto: Boolean = false) {
+        val title = "${r.levelName} · ${Store.carName(r.carId)}"
+        val text = if (auto) "운전 기록이 오래 멈춰 있어서 GPS를 끄고 주차로 기록했어요. 층이 틀리면 앱에서 보정해 주세요."
+        else "주차 위치를 기록했어요. 기둥 사진을 찍어두면 더 찾기 쉬워요."
         val n = NotificationCompat.Builder(context, CH_PARKING)
             .setSmallIcon(R.drawable.ic_stat_car)
-            .setContentTitle("${r.levelName} · ${Store.carName(r.carId)}")
-            .setContentText("주차 위치를 기록했어요. 기둥 사진을 찍어두면 더 찾기 쉬워요.")
+            .setContentTitle(if (auto) "자동으로 주차 기록 · $title" else title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setAutoCancel(true)
             .setContentIntent(openIntent(context, r.id))
             .build()

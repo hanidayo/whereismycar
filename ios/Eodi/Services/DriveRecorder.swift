@@ -21,6 +21,12 @@ struct DriveState: Codable {
     var lastLat: Double?
     var lastLon: Double?
     var lastAccuracy: Double?
+    /// 마지막으로 의미 있게(moveThreshold 이상) 움직인 위치·시각 — 자동 종료 판단용
+    var moveLat: Double?
+    var moveLon: Double?
+    var lastMoveAt: Date?
+    /// 기준점 이후 가장 높은 기압(=가장 낮은 위치). 자동 종료 때 층 계산에 씀
+    var peakPressure: Double?
 }
 
 @MainActor
@@ -35,11 +41,19 @@ final class DriveRecorder: NSObject, ObservableObject {
     static let goodAccuracy: CLLocationAccuracy = 25
     /// 기준 기압은 마지막 GPS 시점보다 몇 초 앞의 값을 씀(경사로에 들어서기 전)
     static let lookback: TimeInterval = 5
+    /// 이만큼 움직이지 않으면(지하에서 GPS가 안 잡히는 시간 포함) 주차한 것으로 보고 자동 종료
+    static let idleLimit: TimeInterval = 30 * 60
+    /// 운전 시작 후 이 시간이 지나면 무조건 자동 종료(배터리 보호)
+    static let maxDuration: TimeInterval = 8 * 60 * 60
+    /// 이 거리(m) 이상 움직여야 "움직였다"로 봄
+    static let moveThreshold: CLLocationDistance = 100
 
     private let locationManager = CLLocationManager()
     private let altimeter = CMAltimeter()
     private var buffer: [PressureSample] = []
     private var sensorsRunning = false
+    private var watchdog: Timer?
+    private var autoParking = false
     private let stateKey = "eodi.driveState"
 
     var isAltimeterAvailable: Bool { CMAltimeter.isRelativeAltitudeAvailable() }
@@ -83,8 +97,9 @@ final class DriveRecorder: NSObject, ObservableObject {
     }
 
     /// 주차 확정: 지금 기압과 기준 기압 차이로 층을 계산하고 기록을 남김
+    /// auto: 단축어가 실패해 기록이 계속 켜져 있을 때 안전장치가 부른 경우
     @discardableResult
-    func park(carID: UUID?) async -> ParkingRecord? {
+    func park(carID: UUID?, auto: Bool = false) async -> ParkingRecord? {
         let store = ParkingStore.shared
         let s = state
         guard let id = carID ?? s?.carID ?? store.defaultCar?.id else { return nil }
@@ -93,6 +108,11 @@ final class DriveRecorder: NSObject, ObservableObject {
         var delta: Double?
         if let ref = s?.refPressure, let now = nowPressure {
             delta = Altitude.meters(kPa: now) - Altitude.meters(kPa: ref)
+        }
+        // 자동 종료는 주차 후 한참 뒤라 사람이 위층으로 갔을 수 있음 → 입구 이후 가장 낮았던 지점을 씀
+        if auto, let ref = s?.refPressure, let peak = s?.peakPressure {
+            let lowest = Altitude.meters(kPa: peak) - Altitude.meters(kPa: ref)
+            if delta.map({ lowest < $0 }) ?? true { delta = lowest }
         }
 
         var coordinate: CLLocationCoordinate2D?
@@ -108,7 +128,10 @@ final class DriveRecorder: NSObject, ObservableObject {
         stopDrive()
         let record = store.recordParking(carID: id, coordinate: coordinate, accuracy: accuracy, delta: delta)
         // 가족 공유를 쓰면 ntfy가 모두에게(나 포함) 알리므로 로컬 알림은 생략
-        if !store.sync.isConfigured {
+        if auto {
+            Notifier.post(title: "자동으로 주차 기록 · \(record.levelName) · \(store.carName(id))",
+                          body: "운전 기록이 오래 멈춰 있어서 GPS를 끄고 주차로 기록했어요. 층이 틀리면 앱에서 보정해 주세요.")
+        } else if !store.sync.isConfigured {
             Notifier.post(title: "\(record.levelName) · \(store.carName(id))",
                           body: "주차 위치를 기록했어요. 기둥 번호 사진을 찍어두면 더 찾기 쉬워요.")
         }
@@ -121,6 +144,8 @@ final class DriveRecorder: NSObject, ObservableObject {
         locationManager.stopUpdatingLocation()
         locationManager.allowsBackgroundLocationUpdates = false
         altimeter.stopRelativeAltitudeUpdates()
+        watchdog?.invalidate()
+        watchdog = nil
         sensorsRunning = false
         buffer.removeAll()
     }
@@ -133,6 +158,9 @@ final class DriveRecorder: NSObject, ObservableObject {
         locationManager.allowsBackgroundLocationUpdates = true
         locationManager.showsBackgroundLocationIndicator = true
         locationManager.startUpdatingLocation()
+        watchdog = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkAutoStop() }
+        }
 
         guard isAltimeterAvailable else { return }
         altimeter.startRelativeAltitudeUpdates(to: .main) { [weak self] data, _ in
@@ -147,6 +175,26 @@ final class DriveRecorder: NSObject, ObservableObject {
         buffer.append(sample)
         let cutoff = Date().addingTimeInterval(-180)
         buffer.removeAll { $0.date < cutoff }
+
+        if var s = state, s.refPressure != nil, sample.kPa > (s.peakPressure ?? -.infinity) {
+            s.peakPressure = sample.kPa
+            state = s
+            persist()
+        }
+    }
+
+    /// 단축어 "연결 해제될 때"가 실패해도 GPS가 계속 켜져 있지 않게 하는 안전장치
+    private func checkAutoStop() {
+        guard let s = state, !autoParking else { return }
+        let now = Date()
+        let idle = now.timeIntervalSince(s.lastMoveAt ?? s.startedAt)
+        let total = now.timeIntervalSince(s.startedAt)
+        guard idle > Self.idleLimit || total > Self.maxDuration else { return }
+        autoParking = true
+        Task {
+            await park(carID: s.carID, auto: true)
+            autoParking = false
+        }
     }
 
     private func handle(location loc: CLLocation) {
@@ -154,6 +202,17 @@ final class DriveRecorder: NSObject, ObservableObject {
         s.lastLat = loc.coordinate.latitude
         s.lastLon = loc.coordinate.longitude
         s.lastAccuracy = loc.horizontalAccuracy
+
+        if loc.horizontalAccuracy > 0, loc.horizontalAccuracy <= 50 {
+            let moved = s.moveLat.flatMap { la in s.moveLon.map { lo in
+                CLLocation(latitude: la, longitude: lo).distance(from: loc)
+            } } ?? .infinity
+            if moved >= Self.moveThreshold {
+                s.moveLat = loc.coordinate.latitude
+                s.moveLon = loc.coordinate.longitude
+                s.lastMoveAt = Date()
+            }
+        }
 
         let age = -loc.timestamp.timeIntervalSinceNow
         if loc.horizontalAccuracy > 0, loc.horizontalAccuracy <= Self.goodAccuracy, age < 10 {
@@ -164,9 +223,11 @@ final class DriveRecorder: NSObject, ObservableObject {
             if let p = pressure(near: loc.timestamp.addingTimeInterval(-Self.lookback)) {
                 s.refPressure = p
             }
+            s.peakPressure = nil // 아직 지상 → 최저점 다시 추적
         }
         state = s
         persist()
+        checkAutoStop()
     }
 
     private func pressure(near date: Date) -> Double? {
