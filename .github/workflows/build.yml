@@ -25,7 +25,17 @@ jobs:
           else
             echo "::warning::ANDROID_KEYSTORE_B64 비밀값이 없어 임시 디버그 키로 서명합니다 (업데이트 시 재설치 필요)."
           fi
-      - name: Build APK (google-services.json 없이)
+      - name: Firebase 설정 (Secrets에 있을 때만 → 푸시 켜짐)
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+            echo "google-services.json 적용 → 푸시(FCM) 포함 빌드"
+          else
+            echo "::warning::GOOGLE_SERVICES_JSON 비밀값이 없어 푸시 없이 빌드합니다."
+          fi
+      - name: Build APK
         working-directory: android
         env:
           EODI_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
