@@ -1,3 +1,5 @@
+name: eodi   # 프로젝트 이름 고정 (폴더명 "server"가 다른 서버와 겹치지 않게)
+
 services:
   eodi:
     build: .
