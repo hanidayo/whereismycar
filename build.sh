@@ -160,21 +160,34 @@ build_android() {
 # ------------------------------------------------------------------ 아이폰
 
 pick_device() {
+    # 출력: 상태<TAB>udid<TAB>이름<TAB>iOS버전   (상태: ok | notconnected | none)
     local json="$LOGS/devices.json"
-    xcrun devicectl list devices --json-output "$json" >/dev/null 2>&1 || return 1
-    /usr/bin/python3 - "$json" <<'PY'
+    xcrun devicectl list devices --json-output "$json" >/dev/null 2>&1 || { printf 'none\n'; return; }
+    /usr/bin/python3 - "$json" "${DEVICE:-}" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
+want = sys.argv[2].lower()
+phones = []
 for dev in d.get("result", {}).get("devices", []):
     hp = dev.get("hardwareProperties", {})
     cp = dev.get("connectionProperties", {})
+    dp = dev.get("deviceProperties", {})
     if hp.get("platform") != "iOS" or hp.get("reality") == "virtual":
         continue
-    if cp.get("pairingState") != "paired" and cp.get("tunnelState") not in ("connected", "available"):
+    name = dp.get("name", "")
+    if want:
+        if want not in name.lower() and want != str(hp.get("udid", "")).lower():
+            continue
+    elif hp.get("deviceType") != "iPhone":
         continue
-    name = dev.get("deviceProperties", {}).get("name", "iPhone")
-    print(hp.get("udid", dev.get("identifier")), name, sep="\t")
-    break
+    connected = cp.get("transportType") == "wired" or cp.get("tunnelState") == "connected"
+    phones.append((connected, hp.get("udid") or dev.get("identifier"), name, dp.get("osVersionNumber", "")))
+if not phones:
+    print("none")
+else:
+    phones.sort(key=lambda p: not p[0])
+    c, udid, name, os_ = phones[0]
+    print("ok" if c else "notconnected", udid, name, os_, sep="\t")
 PY
 }
 
@@ -184,16 +197,29 @@ build_ios() {
 
     "$XCODEGEN" generate 2>&1 | tee "$LOGS/xcodegen.log" || { red "✗ xcodegen 실패"; return 1; }
 
-    local line udid name
-    line=$(pick_device)
-    if [ -z "$line" ]; then
-        red "✗ USB로 연결된 아이폰을 못 찾았어요."
-        echo "   1) 케이블 연결 → 아이폰 잠금 해제 → '이 컴퓨터를 신뢰' 누르기"
-        echo "   2) 그래도 안 되면 Xcode › Window › Devices and Simulators 를 한 번 열어 두고 다시 실행"
+    local line st udid name ios xmaj imaj
+    IFS=$'\t' read -r st udid name ios <<< "$(pick_device)"
+    if [ "$st" = none ]; then
+        red "✗ 이 맥과 페어링된 아이폰이 없어요."
+        echo "   케이블 연결 → 아이폰 잠금 해제 → '이 컴퓨터를 신뢰' → 다시 실행"
         return 1
     fi
-    udid=${line%%$'\t'*}; name=${line#*$'\t'}
-    ok "기기: $name ($udid)"
+    if [ "$st" = notconnected ]; then
+        red "✗ $name 이(가) 지금 연결돼 있지 않아요."
+        echo "   USB 케이블로 연결하고 아이폰 잠금을 푼 뒤 다시 실행하세요."
+        echo "   (다른 기기를 쓰려면: DEVICE=\"기기 이름\" bash build.sh ios)"
+        return 1
+    fi
+    ok "기기: $name · iOS $ios ($udid)"
+
+    xmaj=$(xcodebuild -version | awk 'NR==1{split($2,v,"."); print v[1]}')
+    imaj=${ios%%.*}
+    if [ -n "$imaj" ] && [ -n "$xmaj" ] && [ "$imaj" -gt "$xmaj" ] 2>/dev/null; then
+        red "✗ 아이폰은 iOS $ios 인데 Xcode는 $xmaj 버전이에요."
+        echo "   iOS $imaj 기기에 설치하려면 Xcode $imaj 이상이 필요해요."
+        echo "   App Store › 업데이트 에서 Xcode를 올린 뒤(한 번 실행해서 구성요소 설치) 다시 실행하세요."
+        return 1
+    fi
 
     echo "  빌드 중… (처음엔 기기 준비 때문에 몇 분 걸릴 수 있어요. 아이폰 잠금은 풀어 두세요)"
     if ! xcodebuild -project Eodi.xcodeproj -scheme Eodi -configuration Debug \
