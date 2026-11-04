@@ -60,6 +60,9 @@ final class DriveRecorder: NSObject, ObservableObject {
 
     var isAltimeterAvailable: Bool { CMAltimeter.isRelativeAltitudeAvailable() }
 
+    /// 시스템이 마지막으로 알고 있는 위치 (차 자동 선택용)
+    var lastKnownLocation: CLLocation? { locationManager.location }
+
     /// 실시간: 기준점 대비 높이 변화(m)
     var liveDelta: Double? {
         guard let ref = state?.refPressure, let now = latestPressure?.kPa else { return nil }

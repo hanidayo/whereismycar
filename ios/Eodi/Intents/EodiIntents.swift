@@ -42,6 +42,7 @@ struct StartDriveIntent: AppIntent {
         var id = car?.id
         if id == nil {
             id = store.car(for: await CarPlayRoute.waitForCurrent())?.id
+                ?? store.carParkedNear(DriveRecorder.shared.lastKnownLocation)?.id
         }
         if let id = id ?? DriveRecorder.shared.state?.carID ?? store.defaultCar?.id {
             DriveRecorder.shared.startDrive(carID: id)

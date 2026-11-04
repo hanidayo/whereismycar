@@ -80,6 +80,16 @@ final class ParkingStore: ObservableObject {
         return link.flatMap { car($0.carID) }
     }
 
+    /// CarPlay로 못 고를 때: 지금 위치 근처(300m)에 마지막으로 주차된 차가 딱 한 대면 그 차
+    func carParkedNear(_ location: CLLocation?) -> Car? {
+        guard let location else { return nil }
+        let near = cars.filter { car in
+            guard let c = current(for: car.id)?.coordinate else { return false }
+            return CLLocation(latitude: c.latitude, longitude: c.longitude).distance(from: location) <= 300
+        }
+        return near.count == 1 ? near[0] : nil
+    }
+
     func current(for carID: UUID) -> ParkingRecord? {
         records.filter { $0.carID == carID }.max { $0.date < $1.date }
     }

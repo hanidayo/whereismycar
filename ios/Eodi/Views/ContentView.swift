@@ -217,7 +217,8 @@ struct ManualControls: View {
         .card()
         .onAppear {
             if selected == nil {
-                selected = recorder.state?.carID ?? store.car(for: CarPlayRoute.current())?.id ?? store.defaultCar?.id
+                selected = recorder.state?.carID ?? store.car(for: CarPlayRoute.current())?.id
+                    ?? store.carParkedNear(recorder.lastKnownLocation)?.id ?? store.defaultCar?.id
             }
         }
     }

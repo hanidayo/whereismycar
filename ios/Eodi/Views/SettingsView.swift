@@ -86,6 +86,7 @@ struct CarEditView: View {
     @EnvironmentObject var store: ParkingStore
     @State private var car: Car
     @State private var detected: CarPlayRoute.Info?
+    @State private var routeLines: [String] = []
 
     init(car: Car) { _car = State(initialValue: car) }
 
@@ -126,11 +127,17 @@ struct CarEditView: View {
                 if store.carPlayLink(for: car.id) != nil {
                     Button("CarPlay 지정 해제", role: .destructive) { store.unlinkCarPlay(carID: car.id) }
                 }
-                Button("다시 감지") { detected = CarPlayRoute.current() }
+                Button("다시 감지") { refreshRoute() }
+                DisclosureGroup("오디오 출력 진단") {
+                    if routeLines.isEmpty {
+                        Text("출력 정보 없음").font(.caption).foregroundStyle(.secondary)
+                    }
+                    ForEach(routeLines, id: \.self) { Text($0).font(.caption.monospaced()) }
+                }
             } header: {
                 Text("CarPlay")
             } footer: {
-                Text("이 차의 CarPlay에 연결된 상태에서 지정해 두면, 단축어 '운전 시작'에서 차를 비워 둬도 이 차로 기록해요. CarPlay 차가 여러 대일 때 필요해요.")
+                Text("이 차의 CarPlay에 연결된 상태에서 지정해 두면, 단축어 '운전 시작'에서 차를 비워 둬도 이 차로 기록해요. CarPlay로 못 고르면 지금 위치 근처에 주차된 차가 한 대뿐일 때 그 차로 기록해요.")
             }
             Section {
                 HStack {
@@ -141,8 +148,15 @@ struct CarEditView: View {
             } header: { Text("미리보기") }
         }
         .navigationTitle(car.name.isEmpty ? "차" : car.name)
-        .onAppear { detected = CarPlayRoute.current() }
+        .onAppear { refreshRoute() }
         .onDisappear { store.updateCar(car) }
+    }
+}
+
+extension CarEditView {
+    fileprivate func refreshRoute() {
+        detected = CarPlayRoute.current()
+        routeLines = CarPlayRoute.describeRoute()
     }
 }
 
