@@ -115,6 +115,13 @@ final class DriveRecorder: NSObject, ObservableObject {
     func park(carID: UUID?, auto: Bool = false) async -> ParkingRecord? {
         let store = ParkingStore.shared
         let s = state
+        // 블루투스·CarPlay 자동화가 둘 다 "주차 기록"을 실행해도 기록은 하나만
+        if s == nil, !auto,
+           let recent = store.records.max(by: { $0.date < $1.date }),
+           Date().timeIntervalSince(recent.date) < 3 * 60,
+           carID == nil || carID == recent.carID {
+            return recent
+        }
         guard let id = carID ?? s?.carID ?? store.defaultCar?.id else { return nil }
         let nowPressure = await currentPressure()
 

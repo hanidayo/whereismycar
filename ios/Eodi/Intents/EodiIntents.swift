@@ -40,6 +40,10 @@ struct StartDriveIntent: AppIntent {
     func perform() async throws -> some IntentResult {
         let store = ParkingStore.shared
         var id = car?.id
+        // 이미 다른 자동화(블루투스 등)가 차를 정해서 기록 중이면, 차를 비운 자동화는 차를 바꾸지 않음
+        if id == nil, let s = DriveRecorder.shared.state, Date().timeIntervalSince(s.startedAt) < 15 * 60 {
+            return .result()
+        }
         if id == nil {
             id = store.car(for: await CarPlayRoute.waitForCurrent())?.id
                 ?? store.carParkedNear(DriveRecorder.shared.lastKnownLocation)?.id
