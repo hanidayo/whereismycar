@@ -61,7 +61,7 @@ jobs:
           path: eodi.apk
 
   ios:
-    runs-on: macos-15
+    runs-on: macos-15-intel   # arm64 러너가 자주 부족해서 인텔 러너 사용
     steps:
       - uses: actions/checkout@v4
       - name: Install xcodegen
