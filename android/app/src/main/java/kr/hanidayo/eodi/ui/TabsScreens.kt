@@ -149,15 +149,14 @@ fun LocationScreen(resumeTick: Int, onOpen: (String) -> Unit) {
                         Row(
                             Modifier.clip(RoundedCornerShape(50)).background(Eodi.colors.soft)
                                 .clickable {
-                                    val label = Uri.encode("${car.name} ${longLevelName(r.level)}")
-                                    ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:$lat,$lon?q=$lat,$lon($label)")))
+                                    kr.hanidayo.eodi.util.NaverMap.walkTo(ctx, lat, lon, "${car.name} ${longLevelName(r.level)}")
                                 }
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Icon(Icons.Filled.Map, null, tint = Eodi.colors.primary, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("지도", color = Eodi.colors.primary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("길찾기", color = Eodi.colors.primary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
                     }
                 }

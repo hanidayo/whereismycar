@@ -99,20 +99,21 @@ struct ParkingDetailView: View {
             .allowsHitTesting(false)
 
             Button {
-                let q = store.carName(r.carID).addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-                if let url = URL(string: "http://maps.apple.com/?ll=\(c.latitude),\(c.longitude)&q=\(q)") {
-                    openURL(url)
+                let name = "\(store.carName(r.carID)) \(Level.longName(r.level))"
+                if let url = NaverMap.walkURL(lat: c.latitude, lon: c.longitude, name: name) {
+                    // 네이버 지도가 없으면 앱스토어로
+                    openURL(url) { ok in if !ok { openURL(NaverMap.appStore) } }
                 }
             } label: {
                 HStack {
-                    Label("지도 앱에서 길찾기", systemImage: "arrow.triangle.turn.up.right.diamond.fill")
+                    Label("네이버 지도로 길찾기", systemImage: "figure.walk")
                     Spacer()
                     Image(systemName: "chevron.right").font(.footnote).foregroundStyle(.tertiary)
                 }
                 .padding(16)
             }
         }
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(Palette.card)
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 

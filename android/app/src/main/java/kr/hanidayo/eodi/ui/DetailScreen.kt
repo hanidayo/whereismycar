@@ -188,8 +188,7 @@ private fun LocationCard(r: ParkingRecord, carName: String) {
     val lat = r.latitude ?: return
     val lon = r.longitude ?: return
     EodiCard(Modifier.clip(RoundedCornerShape(22.dp)).clickable {
-        val uri = Uri.parse("geo:$lat,$lon?q=$lat,$lon(${Uri.encode(carName)})")
-        ctx.startActivity(Intent(Intent.ACTION_VIEW, uri))
+        kr.hanidayo.eodi.util.NaverMap.walkTo(ctx, lat, lon, "$carName ${longLevelName(r.level)}")
     }) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(44.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
@@ -198,7 +197,7 @@ private fun LocationCard(r: ParkingRecord, carName: String) {
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text("지도 앱에서 길찾기", style = MaterialTheme.typography.titleMedium)
+                Text("네이버 지도로 길찾기", style = MaterialTheme.typography.titleMedium)
                 Text(String.format(Locale.US, "%.5f, %.5f", lat, lon), color = Eodi.colors.secondaryText, fontSize = 13.sp)
             }
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Eodi.colors.tertiaryText)

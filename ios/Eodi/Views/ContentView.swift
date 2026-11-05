@@ -59,9 +59,9 @@ struct ContentView: View {
                             DistanceTile(car: car)
                         }
                     }
+                    ManualControls(car: car)
                     SectionHeader(title: "최근 기록", trailing: "전체 보기", action: openHistory)
                     RecentList(limit: 4)
-                    ManualControls(car: car)
                 }
                 .padding(.horizontal, 18)
                 .padding(.bottom, 24)

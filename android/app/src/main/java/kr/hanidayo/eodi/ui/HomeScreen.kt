@@ -183,6 +183,7 @@ fun HomeScreen(
                     }
                 }
             }
+            item { ManualControls(car) }
             item { SectionHeader("최근 기록", "전체 보기", onHistory) }
             item {
                 val recent = data.records.sortedByDescending { it.instant }.take(4)
@@ -197,7 +198,6 @@ fun HomeScreen(
                     }
                 }
             }
-            item { ManualControls(car) }
         }
     }
 }
