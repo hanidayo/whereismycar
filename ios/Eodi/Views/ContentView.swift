@@ -147,7 +147,10 @@ struct HeroCard: View {
         let driving = recorder.state?.carID == car.id
         let content = HStack(alignment: .center, spacing: 8) {
             VStack(alignment: .leading, spacing: 12) {
-                Label(driving ? "운전 기록 중" : "현재 위치 감지", systemImage: driving ? "dot.radiowaves.left.and.right" : "location.circle")
+                Label(driving ? "운전 기록 중" : (record.flatMap { store.place(for: $0)?.name } ?? "현재 위치 감지"),
+                      systemImage: driving ? "dot.radiowaves.left.and.right"
+                          : PlaceIcon.resolve(icon: record.flatMap { store.place(for: $0)?.icon },
+                                              name: record.flatMap { store.place(for: $0)?.name }).symbol)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.85))
                 Group {
@@ -263,16 +266,12 @@ struct RecordRow: View {
     let record: ParkingRecord
 
     var body: some View {
-        let garage = record.garageID.flatMap { id in store.garages.first { $0.id == id } }
+        let garage = store.place(for: record)
         let place = garage?.name ?? (record.coordinate == nil ? "위치 없음" : "주차장")
-        let home = place.contains("집")
-        let color = home ? Palette.primary : Color(hex: 0x2E9E6E)
+        let icon = PlaceIcon.resolve(icon: garage?.icon, name: garage?.name)
+        let color = icon.color
         HStack(spacing: 14) {
-            Image(systemName: home ? "house.fill" : "building.2.fill")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(color)
-                .frame(width: 52, height: 52)
-                .background(color.opacity(0.13), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            PlaceBadge(place: icon)
             VStack(alignment: .leading, spacing: 3) {
                 Text("\(place) · \(store.carName(record.carID))")
                     .font(.footnote.weight(.semibold)).foregroundStyle(Palette.sub).lineLimit(1)

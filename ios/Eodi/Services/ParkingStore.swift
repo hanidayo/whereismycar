@@ -204,9 +204,41 @@ final class ParkingStore: ObservableObject {
     }
 
     func renameGarage(_ id: UUID, to name: String) {
+        updateGarage(id, name: name, icon: garages.first { $0.id == id }?.icon)
+    }
+
+    func updateGarage(_ id: UUID, name: String, icon: String?) {
         guard let i = garages.firstIndex(where: { $0.id == id }) else { return }
-        garages[i].name = name.isEmpty ? nil : name
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        garages[i].name = trimmed.isEmpty ? nil : trimmed
+        garages[i].icon = icon
         let g = garages[i]
+        push { try await $0.putGarage(g) }
+    }
+
+    // MARK: - 장소 (학습된 주차장 + 이름만 붙인 곳)
+
+    /// 이 기록의 장소: 연결된 주차장, 없으면 같은 입구로 보이는 곳
+    func place(for r: ParkingRecord) -> GarageProfile? {
+        if let id = r.garageID, let g = garages.first(where: { $0.id == id }) { return g }
+        return r.coordinate.flatMap { garage(near: $0, course: r.course) }
+    }
+
+    /// 기록 화면에서 장소 이름·아이콘 지정. 장소가 없던 위치면 새 장소로 저장 (층 학습 전이라도)
+    func setPlace(for recordID: UUID, name: String, icon: String?) {
+        guard let ri = records.firstIndex(where: { $0.id == recordID }) else { return }
+        let r = records[ri]
+        if let g = place(for: r) {
+            updateGarage(g.id, name: name, icon: icon)
+            if records[ri].garageID == nil { records[ri].garageID = g.id }
+            return
+        }
+        guard let c = r.coordinate else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        let g = GarageProfile(latitude: c.latitude, longitude: c.longitude,
+                              name: trimmed.isEmpty ? nil : trimmed, course: r.course, icon: icon)
+        garages.append(g)
+        records[ri].garageID = g.id
         push { try await $0.putGarage(g) }
     }
 

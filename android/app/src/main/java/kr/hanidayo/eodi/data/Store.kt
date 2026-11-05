@@ -215,6 +215,44 @@ object Store {
         if (g != null) push { it.putGarage(g) }
     }
 
+    /** 이 기록의 장소: 연결된 주차장, 없으면 같은 입구로 보이는 곳 */
+    fun place(data: AppData, r: ParkingRecord): GarageProfile? {
+        data.garages.firstOrNull { it.id == r.garageId }?.let { return it }
+        val lat = r.latitude ?: return null
+        val lon = r.longitude ?: return null
+        return garageNear(lat, lon, r.course)
+    }
+
+    fun updateGarage(id: String, name: String, icon: String?) {
+        val n = name.trim().ifEmpty { null }
+        val g = update { d -> d.copy(garages = d.garages.map { if (it.id == id) it.copy(name = n, icon = icon) else it }) }
+            .garages.firstOrNull { it.id == id } ?: return
+        push { it.putGarage(g) }
+    }
+
+    /** 기록 화면에서 장소 이름·아이콘 지정. 장소가 없던 위치면 새 장소로 저장 (층 학습 전이라도) */
+    fun setPlace(recordId: String, name: String, icon: String?) {
+        val r = record(recordId) ?: return
+        val existing = place(_data.value, r)
+        if (existing != null) {
+            updateGarage(existing.id, name, icon)
+            if (r.garageId == null) {
+                update { d -> d.copy(records = d.records.map { if (it.id == recordId) it.copy(garageId = existing.id) else it }) }
+            }
+            return
+        }
+        val lat = r.latitude ?: return
+        val lon = r.longitude ?: return
+        val g = GarageProfile(latitude = lat, longitude = lon, name = name.trim().ifEmpty { null }, course = r.course, icon = icon)
+        update { d ->
+            d.copy(
+                garages = d.garages + g,
+                records = d.records.map { if (it.id == recordId) it.copy(garageId = g.id) else it },
+            )
+        }
+        push { it.putGarage(g) }
+    }
+
     fun deleteGarage(id: String) {
         update { d -> d.copy(garages = d.garages.filterNot { it.id == id }) }
         push { it.deleteGarage(id) }

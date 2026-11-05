@@ -7,6 +7,7 @@ struct ParkingDetailView: View {
     @Environment(\.openURL) private var openURL
     @State private var showCamera = false
     @State private var analyzing = false
+    @State private var editingPlace = false
 
     var body: some View {
         if let r = store.record(recordID) {
@@ -14,6 +15,7 @@ struct ParkingDetailView: View {
             ScrollView {
                 VStack(spacing: 14) {
                     hero(r, color: color)
+                    if r.coordinate != nil { placeCard(r) }
                     if let c = r.coordinate { mapCard(r, coordinate: c, color: color) }
                     photoCard(r, color: color)
                     infoCard(r)
@@ -41,6 +43,10 @@ struct ParkingDetailView: View {
                 }
             }
             .task { await store.fetchRemotePhoto(recordID) }
+            .sheet(isPresented: $editingPlace) {
+                let g = store.place(for: r)
+                PlaceEditSheet(recordID: recordID, name: g?.name, icon: g?.icon)
+            }
             .fullScreenCover(isPresented: $showCamera) {
                 CameraPicker { image in
                     Task {
@@ -54,6 +60,25 @@ struct ParkingDetailView: View {
         } else {
             ContentUnavailableView("기록 없음", systemImage: "car")
         }
+    }
+
+    private func placeCard(_ r: ParkingRecord) -> some View {
+        let g = store.place(for: r)
+        return Button { editingPlace = true } label: {
+            HStack(spacing: 12) {
+                PlaceBadge(place: PlaceIcon.resolve(icon: g?.icon, name: g?.name), size: 44)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("장소").font(.caption).foregroundStyle(Palette.sub)
+                    Text(g?.name ?? "장소 이름 붙이기")
+                        .font(.system(.headline, design: .rounded))
+                        .foregroundStyle(g?.name == nil ? Palette.primary : Palette.ink)
+                }
+                Spacer()
+                Image(systemName: "pencil").foregroundStyle(Palette.sub)
+            }
+            .card(padding: 14)
+        }
+        .buttonStyle(.plain)
     }
 
     private func hero(_ r: ParkingRecord, color: Color) -> some View {

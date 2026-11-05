@@ -60,10 +60,11 @@ _db.executescript(
     """
 )
 # 진입 방향(도) — 같은 주차장의 입구 구분용. 예전 DB에는 없어서 추가
-for _table in ("parkings", "garages"):
+for _table, _col, _type in (("parkings", "course", "REAL"), ("garages", "course", "REAL"),
+                            ("garages", "icon", "TEXT")):  # icon: 장소 아이콘 (집·회사·공항 등)
     _cols = {r[1] for r in _db.execute(f"PRAGMA table_info({_table})")}
-    if "course" not in _cols:
-        _db.execute(f"ALTER TABLE {_table} ADD COLUMN course REAL")
+    if _col not in _cols:
+        _db.execute(f"ALTER TABLE {_table} ADD COLUMN {_col} {_type}")
 _db.commit()
 
 
@@ -112,7 +113,8 @@ def parking_out(r: sqlite3.Row) -> dict:
 
 def garage_out(r: sqlite3.Row) -> dict:
     return {"id": r["id"], "latitude": r["latitude"], "longitude": r["longitude"],
-            "name": r["name"], "course": r["course"], "samples": json.loads(r["samples"])}
+            "name": r["name"], "course": r["course"], "icon": r["icon"],
+            "samples": json.loads(r["samples"])}
 
 
 # ---------------------------------------------------------------- 알림 (FCM + 선택 ntfy)
@@ -265,6 +267,7 @@ class GarageIn(BaseModel):
     longitude: float
     name: Optional[str] = None
     course: Optional[float] = None
+    icon: Optional[str] = None
     samples: list[GarageSample] = []
 
 
@@ -441,11 +444,12 @@ def put_garage(garage_id: str, body: GarageIn):
     samples = [s.model_dump() | {"record_id": nid(s.record_id)} for s in body.samples][-10:]
     with _lock, _db:
         _db.execute(
-            """INSERT INTO garages(id, latitude, longitude, name, course, samples, updated_at)
-               VALUES(?,?,?,?,?,?,?)
+            """INSERT INTO garages(id, latitude, longitude, name, course, icon, samples, updated_at)
+               VALUES(?,?,?,?,?,?,?,?)
                ON CONFLICT(id) DO UPDATE SET name=excluded.name, samples=excluded.samples,
-               course=COALESCE(excluded.course, garages.course), updated_at=excluded.updated_at""",
-            (nid(garage_id), body.latitude, body.longitude, body.name, body.course,
+               course=COALESCE(excluded.course, garages.course),
+               icon=COALESCE(excluded.icon, garages.icon), updated_at=excluded.updated_at""",
+            (nid(garage_id), body.latitude, body.longitude, body.name, body.course, body.icon,
              json.dumps(samples, ensure_ascii=False), now_iso()))
     return {"ok": True}
 

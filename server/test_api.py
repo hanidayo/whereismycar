@@ -52,9 +52,14 @@ ok(c.put("/api/garages/G-1", json={"id": "G-1", "latitude": 37.5, "longitude": 1
 g = ok(c.get("/api/state", headers=H))["garages"][0]
 assert g["samples"][0]["record_id"] == "p-1" and g["course"] == 10.0, g
 # 방향 없이 다시 올려도 기존 방향 유지
-ok(c.put("/api/garages/g-1", json={"latitude": 37.5, "longitude": 127.0, "name": "정문", "samples": []}, headers=H))
+ok(c.put("/api/garages/g-1", json={"latitude": 37.5, "longitude": 127.0, "name": "정문", "icon": "home",
+                                   "samples": []}, headers=H))
 g = ok(c.get("/api/state", headers=H))["garages"][0]
-assert g["course"] == 10.0 and g["name"] == "정문", g
+assert g["course"] == 10.0 and g["name"] == "정문" and g["icon"] == "home", g
+# 아이콘 없이 다시 올려도 유지
+ok(c.put("/api/garages/g-1", json={"latitude": 37.5, "longitude": 127.0, "name": "집 정문", "samples": []}, headers=H))
+g = ok(c.get("/api/state", headers=H))["garages"][0]
+assert g["icon"] == "home" and g["name"] == "집 정문", g
 
 # 예전 DB(course 컬럼 없음)에서 시작해도 마이그레이션
 import importlib, sqlite3, sys  # noqa: E401,E402
@@ -72,6 +77,6 @@ m.DATA_DIR  # noqa: B018
 del sys.modules["app.main"]
 m2 = importlib.import_module("app.main")
 cols = {r[1] for r in m2._db.execute("PRAGMA table_info(garages)")}
-assert "course" in cols, cols
+assert {"course", "icon"} <= cols, cols
 
 print("서버 테스트 통과")

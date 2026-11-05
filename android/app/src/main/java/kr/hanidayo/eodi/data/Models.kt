@@ -64,6 +64,8 @@ data class GarageProfile(
     val samples: List<GarageSample> = emptyList(),
     /** 이 입구의 진입 방향(도). 가까운 두 입구도 방향으로 구분 */
     val course: Double? = null,
+    /** 장소 아이콘 키 (집·회사·공항 등) */
+    val icon: String? = null,
 )
 
 /** 두 방향(도)의 차이 0~180 */

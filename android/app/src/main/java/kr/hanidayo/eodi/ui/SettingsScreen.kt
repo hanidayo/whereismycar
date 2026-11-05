@@ -10,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -82,6 +83,7 @@ fun SettingsScreen() {
     var member by remember { mutableStateOf(data.sync.member) }
     var result by remember { mutableStateOf<String?>(null) }
     var editing by remember { mutableStateOf<Car?>(null) }
+    var editingPlace by remember { mutableStateOf<kr.hanidayo.eodi.data.GarageProfile?>(null) }
     var height by remember { mutableStateOf(data.defaultFloorHeight.toFloat()) }
 
     fun saveSync() {
@@ -159,18 +161,21 @@ fun SettingsScreen() {
             }
             Hint("처음 가는 주차장에서 쓰는 값이에요. 한 번 보정한 주차장은 학습한 값을 써요.")
 
-            SectionTitle("학습된 주차장")
+            SectionTitle("장소 · 학습된 주차장")
             EodiCard {
                 if (data.garages.isEmpty()) {
-                    Text("주차 기록에서 층을 보정하면 여기에 생겨요.", color = Eodi.colors.secondaryText)
+                    Text("주차 기록에서 장소 이름을 정하거나 층을 보정하면 여기에 생겨요.", color = Eodi.colors.secondaryText)
                 }
                 data.garages.forEachIndexed { i, g ->
                     if (i > 0) HorizontalDivider(Modifier.padding(vertical = 4.dp))
                     val (a, _) = FloorModel.coefficients(g, data.defaultFloorHeight)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.clip(RoundedCornerShape(12.dp)).clickable { editingPlace = g }, verticalAlignment = Alignment.CenterVertically) {
+                        PlaceBadge(PlaceIcon.resolve(g.icon, g.name), 38.dp)
+                        Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(g.name ?: String.format(Locale.US, "%.4f, %.4f", g.latitude, g.longitude))
-                            Text(String.format(Locale.KOREAN, "보정 %d회 · 층 높이 %.1fm", g.samples.size, 1 / a),
+                            Text(if (g.samples.isEmpty()) "층 보정 전"
+                                else String.format(Locale.KOREAN, "보정 %d회 · 층 높이 %.1fm", g.samples.size, 1 / a),
                                 color = Eodi.colors.secondaryText, fontSize = 12.sp)
                         }
                         IconButton(onClick = { Store.deleteGarage(g.id) }) {
@@ -180,6 +185,12 @@ fun SettingsScreen() {
                 }
             }
             Spacer(Modifier.height(32.dp))
+        }
+    }
+
+    editingPlace?.let { g ->
+        PlaceDialog(g.name, g.icon, onDismiss = { editingPlace = null }) { name, icon ->
+            Store.updateGarage(g.id, name, icon); editingPlace = null
         }
     }
 

@@ -118,5 +118,9 @@ jobs:
           if ! gh release view latest >/dev/null 2>&1; then
             gh release create latest --target "$GITHUB_SHA" --prerelease --title "최신 빌드" --notes "$notes"
           fi
-          gh release upload latest "${files[@]}" --clobber
+          # GitHub가 가끔 500을 내므로 몇 번 재시도
+          for i in 1 2 3 4; do
+            gh release upload latest "${files[@]}" --clobber && break
+            echo "업로드 실패, 재시도 $i"; sleep $((i * 10))
+          done
           gh release edit latest --title "최신 빌드 (${GITHUB_SHA::7})" --notes "$notes"

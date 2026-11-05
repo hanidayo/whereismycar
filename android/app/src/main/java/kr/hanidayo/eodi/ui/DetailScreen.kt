@@ -50,6 +50,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -119,6 +121,7 @@ fun DetailScreen(recordId: String, onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Hero(r, color)
+            if (r.hasLocation) PlaceCard(r)
             if (r.hasLocation) LocationCard(r, carName)
             PhotoCard(r, color)
             EodiCard {
@@ -178,6 +181,30 @@ private fun Hero(r: ParkingRecord, color: Color) {
             }
             Text("보정하면 이 주차장의 층 높이를 학습해서 다음부터 더 정확해져요.",
                 color = Eodi.colors.tertiaryText, fontSize = 12.sp, textAlign = TextAlign.Center)
+        }
+    }
+}
+
+@Composable
+private fun PlaceCard(r: ParkingRecord) {
+    val data by Store.data.collectAsStateWithLifecycle()
+    val g = Store.place(data, r)
+    var editing by remember { mutableStateOf(false) }
+    EodiCard(Modifier.clip(RoundedCornerShape(24.dp)).clickable { editing = true }) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            PlaceBadge(PlaceIcon.resolve(g?.icon, g?.name), 44.dp)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text("장소", color = Eodi.colors.secondaryText, fontSize = 12.sp)
+                Text(g?.name ?: "장소 이름 붙이기", fontWeight = FontWeight.Bold, fontSize = 16.sp,
+                    color = if (g?.name == null) Eodi.colors.primary else Eodi.colors.ink)
+            }
+            Icon(Icons.Filled.Edit, "편집", tint = Eodi.colors.secondaryText)
+        }
+    }
+    if (editing) {
+        PlaceDialog(g?.name, g?.icon, onDismiss = { editing = false }) { name, icon ->
+            Store.setPlace(r.id, name, icon); editing = false
         }
     }
 }

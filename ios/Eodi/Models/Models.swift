@@ -54,6 +54,8 @@ struct GarageProfile: Codable, Identifiable {
     var samples: [GarageSample] = []
     /// 이 입구의 진입 방향(도). 가까운 두 입구도 방향으로 구분
     var course: Double?
+    /// 장소 아이콘 키 (PlaceIcon)
+    var icon: String?
 
     var location: CLLocation { CLLocation(latitude: latitude, longitude: longitude) }
 }

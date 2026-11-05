@@ -151,7 +151,8 @@ fun HomeScreen(
                 item {
                     val r = Store.current(data, car.id)
                     val driving = live?.state?.carId == car.id
-                    HeroCard(r, driving, live?.delta) { r?.let { onOpen(it.id) } }
+                    val place = r?.let { Store.place(data, it) }
+                    HeroCard(r, driving, live?.delta, place?.name, PlaceIcon.resolve(place?.icon, place?.name)) { r?.let { onOpen(it.id) } }
                 }
                 item { SectionHeader("감지 상태") }
                 item {
@@ -240,16 +241,19 @@ private fun CarPill(cars: List<Car>, selected: Car, onPick: (String) -> Unit) {
 }
 
 @Composable
-private fun HeroCard(r: ParkingRecord?, driving: Boolean, delta: Double?, onClick: () -> Unit) {
+private fun HeroCard(
+    r: ParkingRecord?, driving: Boolean, delta: Double?, placeName: String?, placeIcon: PlaceIcon,
+    onClick: () -> Unit,
+) {
     val primary = Eodi.colors.primary
     HeroBox(primary, Modifier.clip(RoundedCornerShape(30.dp)).clickable(enabled = r != null && !driving, onClick = onClick)) {
         Row(Modifier.fillMaxWidth().heightIn(min = 210.dp).padding(22.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(if (driving) Icons.Filled.Sensors else Icons.Filled.MyLocation, null,
+                    Icon(if (driving) Icons.Filled.Sensors else if (placeName != null) placeIcon.icon else Icons.Filled.MyLocation, null,
                         tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text(if (driving) "운전 기록 중" else "현재 위치 감지", color = Color.White.copy(alpha = 0.85f),
+                    Text(if (driving) "운전 기록 중" else placeName ?: "현재 위치 감지", color = Color.White.copy(alpha = 0.85f),
                         fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 }
                 Text(
@@ -304,17 +308,15 @@ private fun StatusTile(
 @Composable
 fun RecordRow(r: ParkingRecord, onClick: () -> Unit) {
     val data by Store.data.collectAsStateWithLifecycle()
-    val garage = data.garages.firstOrNull { it.id == r.garageId }
+    val garage = Store.place(data, r)
     val place = garage?.name ?: if (r.latitude == null) "위치 없음" else "주차장"
-    val home = "집" in place
-    val color = if (home) Eodi.colors.primary else Color(0xFF2E9E6E)
+    val icon = PlaceIcon.resolve(garage?.icon, garage?.name)
+    val color = icon.color
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick).padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(52.dp).clip(RoundedCornerShape(16.dp)).background(color.copy(alpha = 0.13f)), contentAlignment = Alignment.Center) {
-            Icon(if (home) Icons.Filled.Home else Icons.Filled.Apartment, null, tint = color)
-        }
+        PlaceBadge(icon)
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text("$place · ${Store.carName(r.carId)}", color = Eodi.colors.secondaryText, fontSize = 13.sp,

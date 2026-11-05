@@ -51,17 +51,21 @@ struct SettingsView: View {
                     Text("처음 가는 주차장에서 쓰는 값이에요. 한 번 보정한 주차장은 학습한 값을 써요.")
                 }
 
-                Section("학습된 주차장") {
+                Section("장소 · 학습된 주차장") {
                     if store.garages.isEmpty {
-                        Text("주차 기록에서 층을 보정하면 여기에 생겨요.").foregroundStyle(.secondary)
+                        Text("주차 기록에서 장소 이름을 정하거나 층을 보정하면 여기에 생겨요.").foregroundStyle(.secondary)
                     }
                     ForEach(store.garages) { g in
                         NavigationLink { GarageEditView(garage: g) } label: {
                             let c = FloorModel.coefficients(profile: g, defaultHeight: store.defaultFloorHeight)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(g.name ?? String(format: "%.4f, %.4f", g.latitude, g.longitude))
-                                Text(String(format: "보정 %d회 · 층 높이 %.1fm", g.samples.count, 1 / c.a))
-                                    .font(.caption).foregroundStyle(.secondary)
+                            HStack(spacing: 12) {
+                                PlaceBadge(place: PlaceIcon.resolve(icon: g.icon, name: g.name), size: 36)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(g.name ?? String(format: "%.4f, %.4f", g.latitude, g.longitude))
+                                    Text(g.samples.isEmpty ? "층 보정 전"
+                                         : String(format: "보정 %d회 · 층 높이 %.1fm", g.samples.count, 1 / c.a))
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }
@@ -164,23 +168,28 @@ struct GarageEditView: View {
     @EnvironmentObject var store: ParkingStore
     let garage: GarageProfile
     @State private var name: String
+    @State private var icon: String?
 
     init(garage: GarageProfile) {
         self.garage = garage
         _name = State(initialValue: garage.name ?? "")
+        _icon = State(initialValue: garage.icon)
     }
 
     var body: some View {
         Form {
-            Section("이름") { TextField("예: 회사 지하주차장", text: $name) }
+            Section("이름") { TextField("예: 집 정문, 회사 지하주차장", text: $name) }
+            Section("아이콘") { PlaceIconGrid(selected: $icon) }
             Section("보정 기록") {
                 ForEach(Array(garage.samples.enumerated()), id: \.offset) { _, s in
                     LabeledContent(Level.name(s.level), value: String(format: "%+.1fm", s.delta))
                 }
             }
         }
-        .navigationTitle("주차장")
-        .onDisappear { if name != (garage.name ?? "") { store.renameGarage(garage.id, to: name) } }
+        .navigationTitle("장소")
+        .onDisappear {
+            if name != (garage.name ?? "") || icon != garage.icon { store.updateGarage(garage.id, name: name, icon: icon) }
+        }
     }
 }
 

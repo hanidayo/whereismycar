@@ -43,6 +43,7 @@ struct RemoteGarage: Codable {
     var longitude: Double
     var name: String?
     var course: Double?
+    var icon: String?
     var samples: [RemoteSample]
 }
 
@@ -156,7 +157,7 @@ struct SyncClient {
 
     func putGarage(_ g: GarageProfile) async throws {
         let body = RemoteGarage(id: Self.key(g.id), latitude: g.latitude, longitude: g.longitude,
-                                name: g.name, course: g.course,
+                                name: g.name, course: g.course, icon: g.icon,
                                 samples: g.samples.map {
                                     RemoteSample(recordId: Self.key($0.recordID), delta: $0.delta, level: $0.level)
                                 })
@@ -197,6 +198,6 @@ extension GarageProfile {
         self.init(id: id, latitude: g.latitude, longitude: g.longitude, name: g.name,
                   samples: g.samples.compactMap { s in
                       UUID(uuidString: s.recordId).map { GarageSample(recordID: $0, delta: s.delta, level: s.level) }
-                  }, course: g.course)
+                  }, course: g.course, icon: g.icon)
     }
 }
