@@ -8,7 +8,7 @@ struct EodiApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
                 .environmentObject(store)
                 .environmentObject(recorder)
                 .onAppear {

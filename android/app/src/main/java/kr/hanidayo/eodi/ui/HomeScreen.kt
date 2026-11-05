@@ -1,6 +1,26 @@
 package kr.hanidayo.eodi.ui
 
 import android.Manifest
+import android.annotation.SuppressLint
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.Apartment
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.Sensors
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import com.google.android.gms.location.LocationServices
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -82,7 +102,7 @@ import java.util.Locale
 fun HomeScreen(
     resumeTick: Int,
     onOpen: (String) -> Unit,
-    onSettings: () -> Unit,
+    onHistory: () -> Unit,
     onAskPermissions: (Array<String>) -> Unit,
 ) {
     val data by Store.data.collectAsStateWithLifecycle()
@@ -90,6 +110,11 @@ fun HomeScreen(
     val live by DriveService.live.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var refreshing by remember { mutableStateOf(false) }
+    var selectedCar by remember { mutableStateOf<String?>(null) }
+    val here = rememberLastLocation(resumeTick)
+    val car = data.cars.firstOrNull { it.id == selectedCar }
+        ?: data.cars.firstOrNull { it.id == live?.state?.carId }
+        ?: data.cars.firstOrNull()
 
     PullToRefreshBox(
         isRefreshing = refreshing,
@@ -97,25 +122,210 @@ fun HomeScreen(
         modifier = Modifier.fillMaxSize().background(Eodi.colors.background),
     ) {
         LazyColumn(
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
             modifier = Modifier.statusBarsPadding(),
         ) {
             item {
-                Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("어디댔지", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.weight(1f))
-                    IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, "설정") }
+                Column(Modifier.padding(top = 14.dp, start = 4.dp)) {
+                    Text(
+                        "어디댔지",
+                        style = MaterialTheme.typography.headlineLarge.copy(
+                            brush = Brush.horizontalGradient(listOf(Eodi.colors.primary, Eodi.colors.primaryDeep)),
+                        ),
+                    )
+                    SyncLine(sync)
                 }
-                SyncLine(sync)
             }
             item(key = "perm-$resumeTick") { PermissionCard(onAskPermissions) }
-            live?.let { l -> item { RecordingBanner(l.delta, Store.carName(l.state.carId), l.state.refTime, l.hasBarometer) } }
-            items(data.cars, key = { it.id }) { car ->
-                val r = Store.current(data, car.id)
-                if (r != null) ParkingCard(r, car) { onOpen(r.id) } else EmptyCard(car)
+            if (car != null) {
+                item {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.LocationOn, null, tint = Eodi.colors.ink, modifier = Modifier.size(22.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("오늘 주차 위치", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Eodi.colors.ink,
+                            modifier = Modifier.weight(1f))
+                        CarPill(data.cars, car) { selectedCar = it }
+                    }
+                }
+                item {
+                    val r = Store.current(data, car.id)
+                    val driving = live?.state?.carId == car.id
+                    HeroCard(r, driving, live?.delta) { r?.let { onOpen(it.id) } }
+                }
+                item { SectionHeader("감지 상태") }
+                item {
+                    val r = Store.current(data, car.id)
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        val driving = live?.state?.carId == car.id
+                        StatusTile("차량 상태", if (driving) "운전 중" else "시동 꺼짐", if (driving) "기록 중" else null,
+                            Modifier.weight(1f)) {
+                            Box(Modifier.size(46.dp).clip(CircleShape)
+                                .background(if (driving) Color(0x24FF5A6E) else Eodi.colors.soft),
+                                contentAlignment = Alignment.Center) {
+                                if (driving) PulsingDot() else Icon(Icons.Filled.PowerSettingsNew, null, tint = Eodi.colors.secondaryText)
+                            }
+                        }
+                        val meters = r?.let { rec ->
+                            val lat = rec.latitude; val lon = rec.longitude
+                            if (lat == null || lon == null || here == null) null else {
+                                val out = FloatArray(1)
+                                android.location.Location.distanceBetween(lat, lon, here.latitude, here.longitude, out)
+                                out[0]
+                            }
+                        }
+                        StatusTile("위치 상태", "차와의 거리", meters?.let(::formatDistance) ?: "알 수 없음",
+                            Modifier.weight(1f)) {
+                            Box(Modifier.size(46.dp).clip(CircleShape).background(Color(0x265AA9F5)), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Filled.LocationOn, null, tint = Color(0xFF3F8EE8))
+                            }
+                        }
+                    }
+                }
             }
-            item { ManualControls(data.cars, live?.state?.carId) }
+            item { SectionHeader("최근 기록", "전체 보기", onHistory) }
+            item {
+                val recent = data.records.sortedByDescending { it.instant }.take(4)
+                EodiCard {
+                    if (recent.isEmpty()) {
+                        Text("아직 주차 기록이 없어요", color = Eodi.colors.secondaryText, fontSize = 14.sp,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp))
+                    }
+                    recent.forEachIndexed { i, r ->
+                        RecordRow(r) { onOpen(r.id) }
+                        if (i < recent.lastIndex) HorizontalDivider(Modifier.padding(start = 66.dp), color = Eodi.colors.soft)
+                    }
+                }
+            }
+            item { ManualControls(car) }
         }
+    }
+}
+
+fun formatDistance(m: Float): String = if (m < 1000) "${m.toInt()}m" else String.format(Locale.US, "%.1fkm", m / 1000)
+
+@SuppressLint("MissingPermission")
+@Composable
+fun rememberLastLocation(tick: Int): android.location.Location? {
+    val ctx = LocalContext.current
+    var loc by remember { mutableStateOf<android.location.Location?>(null) }
+    LaunchedEffect(tick) {
+        if (granted(ctx, Manifest.permission.ACCESS_FINE_LOCATION) || granted(ctx, Manifest.permission.ACCESS_COARSE_LOCATION)) {
+            LocationServices.getFusedLocationProviderClient(ctx).lastLocation.addOnSuccessListener { if (it != null) loc = it }
+        }
+    }
+    return loc
+}
+
+@Composable
+private fun CarPill(cars: List<Car>, selected: Car, onPick: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            Modifier.clip(RoundedCornerShape(50)).background(Eodi.colors.soft)
+                .clickable(enabled = cars.size > 1) { open = true }
+                .padding(horizontal = 16.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(selected.name, color = Eodi.colors.primary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            if (cars.size > 1) Icon(Icons.Filled.KeyboardArrowDown, null, tint = Eodi.colors.primary, modifier = Modifier.size(18.dp))
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            cars.forEach { c ->
+                DropdownMenuItem(text = { Text(c.name) }, onClick = { onPick(c.id); open = false },
+                    trailingIcon = { if (c.id == selected.id) Icon(Icons.Filled.Check, null) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun HeroCard(r: ParkingRecord?, driving: Boolean, delta: Double?, onClick: () -> Unit) {
+    val primary = Eodi.colors.primary
+    HeroBox(primary, Modifier.clip(RoundedCornerShape(30.dp)).clickable(enabled = r != null && !driving, onClick = onClick)) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 210.dp).padding(22.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(if (driving) Icons.Filled.Sensors else Icons.Filled.MyLocation, null,
+                        tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (driving) "운전 기록 중" else "현재 위치 감지", color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Text(
+                    when {
+                        driving -> "주차하면\n자동으로 기록해요"
+                        r != null -> "${longLevelName(r.level)}에\n주차했어요"
+                        else -> "아직 주차\n기록이 없어요"
+                    },
+                    color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Black, lineHeight = 34.sp,
+                )
+                val yellow = Color(0xFFFFE08A)
+                val pill = when {
+                    driving && delta != null -> buildAnnotatedString {
+                        append("입구 대비 "); withStyle(SpanStyle(color = yellow)) { append(String.format(Locale.US, "%+.1fm", delta)) }
+                    }
+                    !driving && r != null -> buildAnnotatedString {
+                        append("기록 완료 · "); withStyle(SpanStyle(color = yellow)) { append(longLevelName(r.level)) }
+                    }
+                    else -> null
+                }
+                if (pill != null) {
+                    Text(pill, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp,
+                        modifier = Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.16f))
+                            .border(1.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape(50))
+                            .padding(horizontal = 14.dp, vertical = 8.dp))
+                }
+            }
+            CarIllustration(if (driving) null else r?.level, primary, 120.dp)
+        }
+    }
+}
+
+@Composable
+private fun StatusTile(
+    title: String, value: String, detail: String?, modifier: Modifier = Modifier,
+    icon: @Composable () -> Unit,
+) {
+    EodiCard(modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            icon()
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text(title, color = Eodi.colors.secondaryText, fontSize = 12.sp)
+                Text(value, color = Eodi.colors.ink, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1)
+                if (detail != null) Text(detail, color = Eodi.colors.secondaryText, fontSize = 12.sp, maxLines = 1)
+            }
+        }
+    }
+}
+
+/** 기록 한 줄 (홈·기록 탭 공용) */
+@Composable
+fun RecordRow(r: ParkingRecord, onClick: () -> Unit) {
+    val data by Store.data.collectAsStateWithLifecycle()
+    val garage = data.garages.firstOrNull { it.id == r.garageId }
+    val place = garage?.name ?: if (r.latitude == null) "위치 없음" else "주차장"
+    val home = "집" in place
+    val color = if (home) Eodi.colors.primary else Color(0xFF2E9E6E)
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick).padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(52.dp).clip(RoundedCornerShape(16.dp)).background(color.copy(alpha = 0.13f)), contentAlignment = Alignment.Center) {
+            Icon(if (home) Icons.Filled.Home else Icons.Filled.Apartment, null, tint = color)
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text("$place · ${Store.carName(r.carId)}", color = Eodi.colors.secondaryText, fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(longLevelName(r.level), color = color, fontSize = 20.sp, fontWeight = FontWeight.Black)
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text(friendlyDate(r.instant), color = Eodi.colors.secondaryText, fontSize = 13.sp)
+            Text(r.member, color = Eodi.colors.tertiaryText, fontSize = 12.sp)
+        }
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Eodi.colors.tertiaryText)
     }
 }
 
@@ -144,73 +354,6 @@ private fun SyncLine(sync: SyncStatus) {
 fun relativeTime(r: ParkingRecord): String =
     DateUtils.getRelativeTimeSpanString(r.instant.toEpochMilli(), System.currentTimeMillis(),
         DateUtils.MINUTE_IN_MILLIS).toString()
-
-@Composable
-private fun ParkingCard(r: ParkingRecord, car: Car, onClick: () -> Unit) {
-    val color = CarPalette.color(car.color)
-    EodiCard(Modifier.clip(RoundedCornerShape(22.dp)).clickable(onClick = onClick)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            FloorTile(r.level, color)
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(car.name, style = MaterialTheme.typography.titleMedium)
-                Text("${r.member} · ${relativeTime(r)}", color = Eodi.colors.secondaryText, fontSize = 14.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    r.pillarText?.let { Chip(it, color, Icons.Outlined.GridView) }
-                    r.deltaMeters?.let {
-                        Text(String.format(Locale.US, "%+.1fm", it), color = Eodi.colors.tertiaryText, fontSize = 12.sp)
-                    }
-                }
-            }
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Eodi.colors.tertiaryText)
-        }
-    }
-}
-
-@Composable
-private fun EmptyCard(car: Car) {
-    val color = CarPalette.color(car.color)
-    EodiCard {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.size(76.dp).border(BorderStroke(2.dp, color.copy(alpha = 0.5f)), RoundedCornerShape(21.dp)),
-                contentAlignment = Alignment.Center,
-            ) { Icon(Icons.Filled.DirectionsCar, null, tint = color) }
-            Spacer(Modifier.width(14.dp))
-            Column {
-                Text(car.name, style = MaterialTheme.typography.titleMedium)
-                Text("아직 주차 기록이 없어요", color = Eodi.colors.secondaryText, fontSize = 14.sp)
-            }
-        }
-    }
-}
-
-@Composable
-private fun RecordingBanner(delta: Double?, carName: String, refTime: Long?, hasBarometer: Boolean) {
-    EodiCard(tint = Color(0xFFFF3B30)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    PulsingDot()
-                    Text("운전 기록 중", style = MaterialTheme.typography.titleMedium)
-                }
-                Text(carName, fontSize = 14.sp)
-                Text(
-                    refTime?.let { "GPS 기준점 ${timeFmt.format(java.time.Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()))}" }
-                        ?: "GPS 기준점 찾는 중…",
-                    color = Eodi.colors.secondaryText, fontSize = 12.sp,
-                )
-                if (!hasBarometer) Text("이 기기는 기압계가 없어 층을 계산할 수 없어요", color = Color(0xFFFF9500), fontSize = 12.sp)
-            }
-            delta?.let {
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(String.format(Locale.US, "%+.1f", it), fontSize = 34.sp, fontWeight = FontWeight.Bold)
-                    Text("m", color = Eodi.colors.secondaryText, fontSize = 12.sp)
-                }
-            }
-        }
-    }
-}
 
 private fun granted(ctx: Context, p: String) =
     ContextCompat.checkSelfPermission(ctx, p) == PackageManager.PERMISSION_GRANTED
@@ -263,45 +406,32 @@ private fun PermissionCard(onAsk: (Array<String>) -> Unit) {
 }
 
 @Composable
-private fun ManualControls(cars: List<Car>, drivingCar: String?) {
+private fun ManualControls(car: Car?) {
     val ctx = LocalContext.current
-    var selected by remember { mutableStateOf(drivingCar ?: cars.firstOrNull()?.id) }
     EodiCard {
-        Text("수동 기록", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(12.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(cars, key = { it.id }) { car ->
-                val on = selected == car.id
-                val color = CarPalette.color(car.color)
-                Text(
-                    car.name,
-                    color = if (on) Color.White else color,
-                    fontWeight = FontWeight.SemiBold, fontSize = 14.sp,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(if (on) color else color.copy(alpha = 0.12f))
-                        .clickable { selected = car.id }
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                )
-            }
-        }
+        Text("수동 기록" + (car?.let { " · ${it.name}" } ?: ""), fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Eodi.colors.ink)
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            FilledTonalButton(
-                onClick = { selected?.let { DriveService.start(ctx, it) } },
-                modifier = Modifier.weight(1f).height(48.dp),
+            Row(
+                Modifier.weight(1f).height(50.dp).clip(RoundedCornerShape(50)).background(Eodi.colors.soft)
+                    .clickable { car?.let { DriveService.start(ctx, it.id) } },
+                horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Filled.DirectionsCar, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("운전 시작")
+                Icon(Icons.Filled.DirectionsCar, null, tint = Eodi.colors.primary, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp)); Text("운전 시작", color = Eodi.colors.primary, fontWeight = FontWeight.Bold)
             }
-            Button(
-                onClick = { DriveService.park(ctx, selected) },
-                modifier = Modifier.weight(1f).height(48.dp),
-                colors = ButtonDefaults.buttonColors(),
+            Row(
+                Modifier.weight(1f).height(50.dp).clip(RoundedCornerShape(50))
+                    .background(Brush.horizontalGradient(listOf(Eodi.colors.primary, Eodi.colors.primaryDeep)))
+                    .clickable { DriveService.park(ctx, car?.id) },
+                horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Filled.LocalParking, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("지금 주차")
+                Icon(Icons.Filled.LocalParking, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp)); Text("지금 주차", color = Color.White, fontWeight = FontWeight.Bold)
             }
         }
         Spacer(Modifier.height(8.dp))
-        Text("평소에는 차 블루투스가 연결·해제될 때 자동으로 기록돼요.", color = Eodi.colors.secondaryText, fontSize = 12.sp)
+        Text("평소에는 차 블루투스가 연결·해제될 때 자동으로 기록돼요. 위에서 차를 바꾸면 그 차로 기록해요.",
+            color = Eodi.colors.secondaryText, fontSize = 12.sp)
     }
 }

@@ -2,7 +2,6 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject var store: ParkingStore
-    @Environment(\.dismiss) private var dismiss
     @State private var testResult: String?
     @State private var testing = false
 
@@ -73,10 +72,11 @@ struct SettingsView: View {
                     NavigationLink("단축어 자동화 연결 방법") { ShortcutGuideView() }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Palette.background.ignoresSafeArea())
             .navigationTitle("설정")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { EditButton() }
-                ToolbarItem(placement: .confirmationAction) { Button("완료") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) { EditButton() }
             }
         }
     }

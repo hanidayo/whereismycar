@@ -61,6 +61,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -73,7 +74,7 @@ import kr.hanidayo.eodi.drive.ActivityWatch
 import java.util.Locale
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen() {
     val data by Store.data.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var server by remember { mutableStateOf(data.sync.serverUrl) }
@@ -88,12 +89,13 @@ fun SettingsScreen(onBack: () -> Unit) {
         if (s != data.sync) { Store.setSync(s); Store.registerDevice() }
     }
 
+    // 탭을 옮기면 입력한 가족 공유 설정 저장
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { saveSync() } }
+
     Column(Modifier.fillMaxSize().background(Eodi.colors.background).statusBarsPadding()) {
-        Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { saveSync(); onBack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "뒤로") }
-            Text("설정", style = MaterialTheme.typography.titleMedium)
-        }
-        Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).navigationBarsPadding()) {
+        Text("설정", fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, color = Eodi.colors.ink,
+            modifier = Modifier.padding(top = 14.dp, start = 22.dp, bottom = 4.dp))
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
 
             SectionTitle("가족 공유")
             EodiCard {

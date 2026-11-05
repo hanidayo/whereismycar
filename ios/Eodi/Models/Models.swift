@@ -66,6 +66,11 @@ func angleDifference(_ a: Double, _ b: Double) -> Double {
 
 enum Level {
     static func name(_ i: Int) -> String { i >= 0 ? "\(i + 1)F" : "B\(-i)" }
+    /// "지하 3층" / "1층" / "층 모름"
+    static func longName(_ i: Int?) -> String {
+        guard let i else { return "층 모름" }
+        return i >= 0 ? "\(i + 1)층" : "지하 \(-i)층"
+    }
 }
 
 enum Altitude {

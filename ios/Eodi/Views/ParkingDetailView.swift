@@ -20,7 +20,7 @@ struct ParkingDetailView: View {
                 }
                 .padding(16)
             }
-            .background(Color(.systemGroupedBackground))
+            .background(Palette.background.ignoresSafeArea())
             .navigationTitle(store.carName(r.carID))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
