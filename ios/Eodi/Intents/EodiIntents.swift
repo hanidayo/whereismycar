@@ -66,6 +66,11 @@ struct ParkIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
+        // 무선 CarPlay는 블루투스로 연결한 뒤 Wi-Fi로 넘어가면서 블루투스가 끊김 →
+        // '블루투스 연결 해제될 때' 자동화가 운전 시작 직후에 실행됨. 그 경우는 무시
+        if let s = DriveRecorder.shared.state, Date().timeIntervalSince(s.startedAt) < 2 * 60 {
+            return .result(dialog: "운전을 막 시작해서 주차 기록은 건너뛰었어요 (CarPlay 연결 전환)")
+        }
         guard let record = await DriveRecorder.shared.park(carID: car?.id) else {
             return .result(dialog: "등록된 차가 없어요.")
         }

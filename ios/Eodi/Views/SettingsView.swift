@@ -187,12 +187,17 @@ struct GarageEditView: View {
 struct ShortcutGuideView: View {
     var body: some View {
         List {
-            Section("추천: 차마다 블루투스 자동화 (CarPlay 차도 동일)") {
+            Section("시작: 차마다 블루투스 '연결될 때'") {
                 step(1, "아이폰 블루투스는 켜 두세요. 무선 CarPlay도 블루투스로 먼저 연결돼요.")
                 step(2, "단축어 앱 › 자동화 › + › 블루투스 › 이 차의 기기 선택 › '연결될 때' › '즉시 실행'")
                 step(3, "동작: 어디댔지 › '운전 시작' › 차를 목록에서 선택")
-                step(4, "같은 기기로 '연결 해제될 때' › '주차 기록' (차 선택)")
-                step(5, "차가 여러 대면 차마다 1~4 반복. 이름을 바꿔도 연결은 유지돼요.")
+                step(4, "차가 여러 대면 차마다 반복")
+            }
+            Section("끝: CarPlay 차는 'CarPlay 연결 해제될 때'") {
+                step(1, "무선 CarPlay는 연결되자마자 블루투스가 끊겨서, 블루투스 '연결 해제' 자동화는 쓰면 안 돼요.")
+                step(2, "단축어 › 자동화 › + › CarPlay › '연결 해제될 때' › '즉시 실행'")
+                step(3, "동작: 어디댔지 › '주차 기록' › 차는 비워 두기 (운전 시작 때 고른 차)")
+                step(4, "CarPlay 없는 차는 블루투스 '연결 해제될 때' › '주차 기록'을 쓰면 돼요.")
             }
             Section("유선 CarPlay라 블루투스가 안 붙는 차") {
                 step(1, "앱 설정 › 차 › 'CarPlay' › 연결된 상태에서 '지금 연결된 CarPlay를 이 차로 지정'")
