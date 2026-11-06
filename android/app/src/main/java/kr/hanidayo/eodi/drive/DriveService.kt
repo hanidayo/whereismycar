@@ -93,6 +93,9 @@ class DriveService : Service(), SensorEventListener {
         private const val GOOD_ACCURACY = 25f
         /** 기준 기압은 마지막 GPS 시점보다 몇 초 앞의 값(경사로 진입 전) */
         private const val LOOKBACK_MS = 5_000L
+        private const val EXTRA_AUTO = "auto"
+        /** 주차 기록 뒤 이 시간 안에 오는 자동 '운전 시작'은 재연결로 보고 무시 */
+        private const val RECONNECT_COOLDOWN_MS = 5 * 60_000L
         /** 이만큼 움직이지 않으면(지하에서 GPS가 안 잡히는 시간 포함) 주차한 것으로 보고 자동 종료 */
         private const val IDLE_LIMIT_MS = 30 * 60_000L
         /** 운전 시작 후 이 시간이 지나면 무조건 자동 종료(배터리 보호) */
@@ -103,13 +106,16 @@ class DriveService : Service(), SensorEventListener {
         private val _live = MutableStateFlow<LiveDrive?>(null)
         val live: StateFlow<LiveDrive?> = _live
 
-        fun start(context: Context, carId: String) = send(context, ACTION_START, carId)
+        /** fromAutomation: 블루투스·탑승 감지가 부른 경우 (주차 직후 재연결이면 무시) */
+        fun start(context: Context, carId: String, fromAutomation: Boolean = false) =
+            send(context, ACTION_START, carId) { putExtra(EXTRA_AUTO, fromAutomation) }
         fun park(context: Context, carId: String?) = send(context, ACTION_PARK, carId)
-        fun startFromActivity(context: Context, carId: String) = send(context, ACTION_START_ACTIVITY, carId)
+        fun startFromActivity(context: Context, carId: String) =
+            send(context, ACTION_START_ACTIVITY, carId) { putExtra(EXTRA_AUTO, true) }
         fun parkFromActivity(context: Context) = send(context, ACTION_PARK_ACTIVITY, null)
 
-        private fun send(context: Context, action: String, carId: String?) {
-            val i = Intent(context, DriveService::class.java).setAction(action).putExtra(EXTRA_CAR, carId)
+        private fun send(context: Context, action: String, carId: String?, extra: Intent.() -> Unit = {}) {
+            val i = Intent(context, DriveService::class.java).setAction(action).putExtra(EXTRA_CAR, carId).apply(extra)
             // Android 12+: 백그라운드(브로드캐스트)에서 포그라운드 서비스 시작이 막히면 예외 → 앱이 죽지 않게
             runCatching { ContextCompat.startForegroundService(context, i) }
         }
@@ -153,6 +159,11 @@ class DriveService : Service(), SensorEventListener {
             )
         } catch (e: Exception) { // 위치 권한이 없으면 Android 14+에서 SecurityException
             return stopAndReturn()
+        }
+        val auto = intent?.getBooleanExtra(EXTRA_AUTO, false) == true
+        if (auto && state == null && intent?.action in setOf(ACTION_START, ACTION_START_ACTIVITY)) {
+            val last = Store.data.value.records.maxOfOrNull { it.instant.toEpochMilli() }
+            if (last != null && System.currentTimeMillis() - last < RECONNECT_COOLDOWN_MS) return stopAndReturn()
         }
         when (intent?.action) {
             ACTION_START -> begin(carId ?: Store.defaultCar?.id ?: return stopAndReturn())
@@ -261,7 +272,9 @@ class DriveService : Service(), SensorEventListener {
             }
         }
         val age = System.currentTimeMillis() - loc.time
-        if (loc.hasAccuracy() && loc.accuracy <= GOOD_ACCURACY && age < 10_000) {
+        // 지하에서도 Wi-Fi로 정확한 척하는 위치가 잡힐 때가 있어서, 속도·고도가 있는 위성(GPS) 위치만 기준점으로
+        val satellite = loc.hasSpeed() && loc.hasAltitude() && loc.hasVerticalAccuracy()
+        if (satellite && loc.hasAccuracy() && loc.accuracy <= GOOD_ACCURACY && age < 10_000) {
             s = s.copy(
                 refLat = loc.latitude, refLon = loc.longitude,
                 refAccuracy = loc.accuracy.toDouble(), refTime = loc.time,
@@ -304,6 +317,11 @@ class DriveService : Service(), SensorEventListener {
         val s = state
         val carId = requestedCar ?: s?.carId ?: Store.defaultCar?.id
         if (carId == null) { shutdown(); return }
+        // 이번 운전에서 GPS를 한 번도 못 잡았으면 주차장을 벗어나지 않은 것(재연결 등) → 이전 기록 유지
+        val prev = Store.current(Store.data.value, carId)
+        if (s != null && s.refPressure == null && s.refLat == null && prev != null &&
+            System.currentTimeMillis() - prev.instant.toEpochMilli() < 6 * 60 * 60_000L
+        ) { shutdown(); return }
 
         val now = currentPressure()
         val ref = s?.refPressure

@@ -39,6 +39,12 @@ struct StartDriveIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult {
         let store = ParkingStore.shared
+        // 주차 직후 블루투스가 끊겼다 다시 붙으면 자동화가 또 실행됨 → 잠깐 무시
+        if DriveRecorder.shared.state == nil,
+           let last = store.records.max(by: { $0.date < $1.date }),
+           Date().timeIntervalSince(last.date) < DriveRecorder.reconnectCooldown {
+            return .result()
+        }
         var id = car?.id
         // 이미 다른 자동화(블루투스 등)가 차를 정해서 기록 중이면, 차를 비운 자동화는 차를 바꾸지 않음
         if id == nil, let s = DriveRecorder.shared.state, Date().timeIntervalSince(s.startedAt) < 15 * 60 {

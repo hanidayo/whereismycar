@@ -23,7 +23,7 @@ class BluetoothReceiver : BroadcastReceiver() {
         val carId = Store.carIdForDevice(address) ?: return
 
         when (intent.action) {
-            BluetoothDevice.ACTION_ACL_CONNECTED -> DriveService.start(context, carId)
+            BluetoothDevice.ACTION_ACL_CONNECTED -> DriveService.start(context, carId, fromAutomation = true)
             BluetoothDevice.ACTION_ACL_DISCONNECTED -> DriveService.park(context, carId)
         }
     }

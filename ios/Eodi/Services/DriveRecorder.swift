@@ -49,6 +49,8 @@ final class DriveRecorder: NSObject, ObservableObject {
     static let maxDuration: TimeInterval = 8 * 60 * 60
     /// 이 거리(m) 이상 움직여야 "움직였다"로 봄
     static let moveThreshold: CLLocationDistance = 100
+    /// 주차 기록 뒤 이 시간 안에 오는 '운전 시작' 자동화는 재연결로 보고 무시
+    static let reconnectCooldown: TimeInterval = 5 * 60
 
     private let locationManager = CLLocationManager()
     private let altimeter = CMAltimeter()
@@ -123,6 +125,12 @@ final class DriveRecorder: NSObject, ObservableObject {
             return recent
         }
         guard let id = carID ?? s?.carID ?? store.defaultCar?.id else { return nil }
+        // 이번 운전에서 GPS를 한 번도 못 잡았으면 주차장을 벗어나지 않은 것(재연결 등) → 이전 기록 유지
+        if let s, s.refPressure == nil, s.refLat == nil,
+           let prev = store.current(for: id), Date().timeIntervalSince(prev.date) < 6 * 60 * 60 {
+            stopDrive()
+            return prev
+        }
         let nowPressure = await currentPressure()
 
         var delta: Double?
@@ -236,7 +244,9 @@ final class DriveRecorder: NSObject, ObservableObject {
         }
 
         let age = -loc.timestamp.timeIntervalSinceNow
-        if loc.horizontalAccuracy > 0, loc.horizontalAccuracy <= Self.goodAccuracy, age < 10 {
+        // 지하에서도 Wi-Fi로 10~20m 정확도 위치가 잡힐 때가 있어서, 속도·고도가 함께 있는 위성(GPS) 위치만 기준점으로
+        let satellite = loc.verticalAccuracy > 0 && loc.speed >= 0 && loc.speedAccuracy >= 0
+        if satellite, loc.horizontalAccuracy > 0, loc.horizontalAccuracy <= Self.goodAccuracy, age < 10 {
             s.refLat = loc.coordinate.latitude
             s.refLon = loc.coordinate.longitude
             s.refAccuracy = loc.horizontalAccuracy
