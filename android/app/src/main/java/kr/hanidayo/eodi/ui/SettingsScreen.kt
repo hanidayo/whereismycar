@@ -98,6 +98,7 @@ fun SettingsScreen() {
         Text("설정", fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, color = Eodi.colors.ink,
             modifier = Modifier.padding(top = 14.dp, start = 22.dp, bottom = 4.dp))
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
+            SensorCheckSection()
 
             SectionTitle("가족 공유")
             EodiCard {

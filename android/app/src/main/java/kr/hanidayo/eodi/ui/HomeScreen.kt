@@ -1,6 +1,8 @@
 package kr.hanidayo.eodi.ui
 
 import android.Manifest
+import androidx.compose.ui.draw.alpha
+import androidx.compose.material.icons.filled.Mic
 import android.annotation.SuppressLint
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.shape.CircleShape
@@ -154,10 +156,7 @@ fun HomeScreen(
                     val place = r?.let { Store.place(data, it) }
                     HeroCard(r, driving, live?.delta, place?.name, PlaceIcon.resolve(place?.icon, place?.name)) { r?.let { onOpen(it.id) } }
                 }
-                val current = Store.current(data, car.id)
-                if (current != null && live?.state?.carId != car.id) {
-                    item(key = "voice-${current.id}") { VoicePillarCard(current) }
-                }
+
                 item { SectionHeader("감지 상태") }
                 item {
                     val r = Store.current(data, car.id)
@@ -188,7 +187,7 @@ fun HomeScreen(
                     }
                 }
             }
-            item { ManualControls(car) }
+            item { ManualControls(car, car?.let { Store.current(data, it.id) }) }
             item { SectionHeader("최근 기록", "전체 보기", onHistory) }
             item {
                 val recent = data.records.sortedByDescending { it.instant }.take(4)
@@ -263,7 +262,7 @@ private fun HeroCard(
                 Text(
                     when {
                         driving -> "주차하면\n자동으로 기록해요"
-                        r != null -> "${longLevelName(r.level)}에\n주차했어요"
+                        r != null -> "${longLevelName(r.level)}${r.pillarText?.let { " $it" } ?: ""}에\n주차했어요"
                         else -> "아직 주차\n기록이 없어요"
                     },
                     color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Black, lineHeight = 34.sp,
@@ -412,8 +411,9 @@ private fun PermissionCard(onAsk: (Array<String>) -> Unit) {
 }
 
 @Composable
-private fun ManualControls(car: Car?) {
+private fun ManualControls(car: Car?, current: ParkingRecord?) {
     val ctx = LocalContext.current
+    val listen = rememberVoicePillar(current)
     EodiCard {
         Text("수동 기록" + (car?.let { " · ${it.name}" } ?: ""), fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Eodi.colors.ink)
         Spacer(Modifier.height(12.dp))
@@ -435,9 +435,18 @@ private fun ManualControls(car: Car?) {
                 Icon(Icons.Filled.LocalParking, null, tint = Color.White, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp)); Text("지금 주차", color = Color.White, fontWeight = FontWeight.Bold)
             }
+            // 기둥 위치 말하기 (이 차의 마지막 기록에)
+            Box(
+                Modifier.size(50.dp).clip(CircleShape).background(Eodi.colors.soft)
+                    .clickable(enabled = current != null) { listen() }
+                    .alpha(if (current != null) 1f else 0.4f),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Mic, "기둥 위치 말하기", tint = Eodi.colors.primary)
+            }
         }
         Spacer(Modifier.height(8.dp))
-        Text("평소에는 차 블루투스가 연결·해제될 때 자동으로 기록돼요. 위에서 차를 바꾸면 그 차로 기록해요.",
+        Text("평소에는 차 블루투스가 연결·해제될 때 자동으로 기록돼요. 🎤 버튼으로 기둥 위치를 말하면 마지막 기록에 저장돼요.",
             color = Eodi.colors.secondaryText, fontSize = 12.sp)
     }
 }

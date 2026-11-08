@@ -56,9 +56,6 @@ struct ContentView: View {
                         }
                         .padding(.horizontal, 4)
                         HeroCard(car: car)
-                        if recorder.state?.carID != car.id, let r = store.current(for: car.id) {
-                            VoicePillarCard(record: r)
-                        }
                         SectionHeader(title: "감지 상태")
                         HStack(spacing: 12) {
                             DriveStatusTile(car: car)
@@ -163,7 +160,7 @@ struct HeroCard: View {
                     if driving {
                         Text("주차하면\n자동으로 기록해요")
                     } else if let r = record {
-                        Text("\(Level.longName(r.level))에\n주차했어요")
+                        Text("\(Level.longName(r.level))\(r.pillarText.map { " \($0)" } ?? "")에\n주차했어요")
                     } else {
                         Text("아직 주차\n기록이 없어요")
                     }
@@ -464,6 +461,7 @@ struct ManualControls: View {
     @EnvironmentObject var recorder: DriveRecorder
     let car: Car?
     @State private var parking = false
+    @State private var voiceFor: UUID?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -494,11 +492,30 @@ struct ManualControls: View {
                                                    startPoint: .leading, endPoint: .trailing), in: Capsule())
                 }
                 .disabled(parking)
+                // 기둥 위치 말하기 (이 차의 마지막 기록에)
+                let current = car.flatMap { store.current(for: $0.id) }
+                Button {
+                    voiceFor = current?.id
+                } label: {
+                    Image(systemName: "mic.fill")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(Palette.primary)
+                        .frame(width: 50, height: 50)
+                        .background(Palette.soft, in: Circle())
+                }
+                .disabled(current == nil)
+                .opacity(current == nil ? 0.4 : 1)
             }
             .buttonStyle(.plain)
-            Text("평소에는 단축어 자동화가 대신 눌러 줘요. 위에서 차를 바꾸면 그 차로 기록해요.")
+            Text("평소에는 단축어 자동화가 대신 눌러 줘요. 🎤 버튼으로 기둥 위치를 말하면 마지막 기록에 저장돼요.")
                 .font(.caption).foregroundStyle(Palette.sub)
         }
         .card()
+        .sheet(item: Binding(get: { voiceFor.map(IdentifiedUUID.init) }, set: { voiceFor = $0?.id })) {
+            VoicePillarSheet(recordID: $0.id)
+        }
     }
 }
+
+/// sheet(item:)용
+struct IdentifiedUUID: Identifiable { let id: UUID }

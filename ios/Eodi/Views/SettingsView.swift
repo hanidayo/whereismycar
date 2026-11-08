@@ -8,6 +8,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                SensorCheckSections()
                 Section {
                     TextField("서버 주소 (예: eodi.hanidayo.kr)", text: $store.sync.serverURL)
                         .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)

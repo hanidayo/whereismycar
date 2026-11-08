@@ -41,32 +41,10 @@ import kr.hanidayo.eodi.data.ParkingRecord
 import kr.hanidayo.eodi.data.Store
 import kr.hanidayo.eodi.util.PillarSpeech
 
-/** "기둥 위치를 말해 보세요" 카드: 구글 음성 인식 → 층·기둥 번호 확인 → 저장 */
+/** "기둥 위치를 말해 보세요" 카드 */
 @Composable
 fun VoicePillarCard(record: ParkingRecord) {
-    val ctx = LocalContext.current
-    var heard by remember { mutableStateOf<Pair<String, PillarSpeech.Result>?>(null) }
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
-        if (res.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
-        val candidates = res.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS).orEmpty()
-        // 후보 중 기둥 번호를 알아들은 첫 문장
-        val best = candidates.map { it to PillarSpeech.parse(it) }
-            .firstOrNull { it.second.pillar != null || it.second.level != null }
-        heard = best ?: candidates.firstOrNull()?.let { it to PillarSpeech.Result(null, null) }
-    }
-    fun listen() {
-        val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")
-            .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
-            .putExtra(RecognizerIntent.EXTRA_PROMPT, "기둥 위치를 말해 주세요 (예: 지하 3층 에이 십이)")
-        try {
-            launcher.launch(i)
-        } catch (_: ActivityNotFoundException) {
-            Toast.makeText(ctx, "이 폰에서는 음성 인식을 쓸 수 없어요", Toast.LENGTH_SHORT).show()
-        }
-    }
-
+    val listen = rememberVoicePillar(record)
     EodiCard(Modifier.clip(RoundedCornerShape(24.dp)).clickable { listen() }) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -78,6 +56,34 @@ fun VoicePillarCard(record: ParkingRecord) {
             Box(Modifier.size(52.dp).clip(CircleShape).background(Eodi.colors.soft), contentAlignment = Alignment.Center) {
                 Icon(Icons.Filled.Mic, "말하기", tint = Eodi.colors.primary)
             }
+        }
+    }
+}
+
+/** 구글 음성 인식 → 층·기둥 번호 확인 대화상자 → 저장. 반환값을 부르면 듣기 시작 */
+@Composable
+fun rememberVoicePillar(record: ParkingRecord?): () -> Unit {
+    val ctx = LocalContext.current
+    var heard by remember { mutableStateOf<Pair<String, PillarSpeech.Result>?>(null) }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        if (res.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
+        val candidates = res.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS).orEmpty()
+        // 후보 중 기둥 번호를 알아들은 첫 문장
+        val best = candidates.map { it to PillarSpeech.parse(it) }
+            .firstOrNull { it.second.pillar != null || it.second.level != null }
+        heard = best ?: candidates.firstOrNull()?.let { it to PillarSpeech.Result(null, null) }
+    }
+    fun listen() {
+        if (record == null) return
+        val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")
+            .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
+            .putExtra(RecognizerIntent.EXTRA_PROMPT, "기둥 위치를 말해 주세요 (예: 지하 3층 에이 십이)")
+        try {
+            launcher.launch(i)
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(ctx, "이 폰에서는 음성 인식을 쓸 수 없어요", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -102,10 +108,11 @@ fun VoicePillarCard(record: ParkingRecord) {
             confirmButton = {
                 TextButton(
                     enabled = parsed.level != null || parsed.pillar != null,
-                    onClick = { Store.applyVoice(record.id, parsed); heard = null },
+                    onClick = { record?.let { Store.applyVoice(it.id, parsed) }; heard = null },
                 ) { Text("저장") }
             },
             dismissButton = { TextButton(onClick = { heard = null; listen() }) { Text("다시 말하기") } },
         )
     }
+    return ::listen
 }

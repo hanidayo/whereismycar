@@ -270,6 +270,9 @@ final class DriveRecorder: NSObject, ObservableObject {
     }
 
     /// 지금 기압 한 번 읽기(앱이 막 깨어나 센서가 꺼져 있어도 동작)
+    /// 셀프점검용: 지금 기압(kPa) 한 번 읽기
+    func readPressure() async -> Double? { await currentPressure() }
+
     private func currentPressure(timeout: TimeInterval = 4) async -> Double? {
         if let s = latestPressure, Date().timeIntervalSince(s.date) < 3 { return s.kPa }
         guard isAltimeterAvailable else { return nil }
