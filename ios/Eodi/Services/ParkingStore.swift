@@ -195,6 +195,18 @@ final class ParkingStore: ObservableObject {
         if let g = changedGarage { push { try await $0.putGarage(g) } }
     }
 
+    /// 음성으로 말한 기둥 번호(·층) 저장. 층을 말했으면 보정으로 처리해 학습에도 반영
+    func applyVoice(_ id: UUID, _ v: PillarSpeech.Result) {
+        guard let i = records.firstIndex(where: { $0.id == id }) else { return }
+        if let p = v.pillar { records[i].pillarText = p }
+        if let level = v.level, level != records[i].level {
+            correct(id, to: level)  // 기둥 번호도 같이 올라감
+        } else if records[i].synced {
+            let r = records[i]
+            push { try await $0.patchParking(r) }
+        }
+    }
+
     /// 다른 차로 잘못 기록됐을 때
     func changeCar(_ id: UUID, to carID: UUID) {
         guard let i = records.firstIndex(where: { $0.id == id }), records[i].carID != carID else { return }

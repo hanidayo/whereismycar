@@ -102,6 +102,8 @@ data class AppData(
     val fcmToken: String? = null,
     /** 블루투스 없이 "차에 탐/내림" 감지로 기록할 차 (null이면 끔) */
     val activityCarId: String? = null,
+    /** 홈에 먼저 보여 줄 차 (이 기기에서만) */
+    val homeCarId: String? = null,
 )
 
 sealed interface SyncStatus {

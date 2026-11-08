@@ -122,6 +122,7 @@ fun DetailScreen(recordId: String, onBack: () -> Unit) {
         ) {
             Hero(r, color)
             if (r.hasLocation) PlaceCard(r)
+            VoicePillarCard(r)
             if (r.hasLocation) LocationCard(r, carName)
             PhotoCard(r, color)
             EodiCard {

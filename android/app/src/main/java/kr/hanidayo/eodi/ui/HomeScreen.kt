@@ -110,9 +110,9 @@ fun HomeScreen(
     val live by DriveService.live.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var refreshing by remember { mutableStateOf(false) }
-    var selectedCar by remember { mutableStateOf<String?>(null) }
     val here = rememberLastLocation(resumeTick)
-    val car = data.cars.firstOrNull { it.id == selectedCar }
+    // 홈에 먼저 보여 줄 차: 직접 고른 차 → 운전 중인 차 → 첫 차
+    val car = data.cars.firstOrNull { it.id == data.homeCarId }
         ?: data.cars.firstOrNull { it.id == live?.state?.carId }
         ?: data.cars.firstOrNull()
 
@@ -145,7 +145,7 @@ fun HomeScreen(
                         Spacer(Modifier.width(6.dp))
                         Text("오늘 주차 위치", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Eodi.colors.ink,
                             modifier = Modifier.weight(1f))
-                        CarPill(data.cars, car) { selectedCar = it }
+                        CarPill(data.cars, car) { Store.setHomeCar(it) }
                     }
                 }
                 item {
@@ -153,6 +153,10 @@ fun HomeScreen(
                     val driving = live?.state?.carId == car.id
                     val place = r?.let { Store.place(data, it) }
                     HeroCard(r, driving, live?.delta, place?.name, PlaceIcon.resolve(place?.icon, place?.name)) { r?.let { onOpen(it.id) } }
+                }
+                val current = Store.current(data, car.id)
+                if (current != null && live?.state?.carId != car.id) {
+                    item(key = "voice-${current.id}") { VoicePillarCard(current) }
                 }
                 item { SectionHeader("감지 상태") }
                 item {

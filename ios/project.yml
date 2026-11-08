@@ -34,3 +34,5 @@ targets:
         NSLocationAlwaysAndWhenInUseUsageDescription: 운전 중 화면이 꺼져 있어도 주차 위치와 층을 기록하려면 '항상 허용'이 필요합니다.
         NSMotionUsageDescription: 기압계로 지하 주차장 층수를 계산합니다.
         NSCameraUsageDescription: 주차 기둥 번호를 사진으로 남깁니다.
+        NSMicrophoneUsageDescription: 말로 기둥 번호를 기록할 때 마이크를 사용합니다.
+        NSSpeechRecognitionUsageDescription: 말한 기둥 번호와 층을 글자로 바꿉니다.

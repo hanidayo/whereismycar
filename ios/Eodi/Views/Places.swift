@@ -118,3 +118,96 @@ struct PlaceEditSheet: View {
         .presentationDetents([.large])
     }
 }
+
+// MARK: - 음성으로 기둥 위치
+
+/// 말하면 기둥 번호(·층)를 알아듣고 저장
+struct VoicePillarSheet: View {
+    @EnvironmentObject var store: ParkingStore
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var listener = SpeechListener()
+    let recordID: UUID
+
+    var body: some View {
+        let parsed = PillarSpeech.parse(listener.text)
+        VStack(spacing: 22) {
+            Text(listener.listening ? "듣고 있어요…" : (listener.text.isEmpty ? "기둥 위치를 말해 주세요" : "이렇게 들었어요"))
+                .font(.system(.title3, design: .rounded).weight(.bold))
+                .foregroundStyle(Palette.ink)
+                .padding(.top, 28)
+            Text("예) \"지하 3층 에이 십이\", \"B2 C 15\", \"가 7번\"")
+                .font(.footnote).foregroundStyle(Palette.sub)
+
+            Button {
+                if listener.listening { listener.stop() } else { Task { await listener.start() } }
+            } label: {
+                ZStack {
+                    Circle().fill(Palette.primary.opacity(listener.listening ? 0.18 : 0.10))
+                        .frame(width: 128, height: 128)
+                        .scaleEffect(listener.listening ? 1.12 : 1)
+                        .animation(listener.listening ? .easeInOut(duration: 0.8).repeatForever(autoreverses: true) : .default,
+                                   value: listener.listening)
+                    Circle().fill(LinearGradient(colors: [Palette.primary, Palette.primaryDeep], startPoint: .top, endPoint: .bottom))
+                        .frame(width: 88, height: 88)
+                    Image(systemName: listener.listening ? "stop.fill" : "mic.fill")
+                        .font(.system(size: 34, weight: .bold)).foregroundStyle(.white)
+                }
+            }
+            .buttonStyle(.plain)
+
+            if !listener.text.isEmpty {
+                Text("“\(listener.text)”").font(.body).foregroundStyle(Palette.ink).multilineTextAlignment(.center)
+                HStack(spacing: 10) {
+                    if let l = parsed.level { Chip(text: Level.longName(l), systemImage: "stairs", color: Palette.primary) }
+                    if let p = parsed.pillar { Chip(text: "기둥 \(p)", systemImage: "number", color: Color(hex: 0x2E9E6E)) }
+                }
+            }
+            if let e = listener.error { Text(e).font(.footnote).foregroundStyle(.orange) }
+            Spacer()
+            Button {
+                store.applyVoice(recordID, parsed)
+                dismiss()
+            } label: {
+                Text("저장").font(.headline).frame(maxWidth: .infinity).padding(.vertical, 15)
+                    .foregroundStyle(.white)
+                    .background(Palette.primary, in: Capsule())
+            }
+            .disabled(listener.listening || (parsed.pillar == nil && parsed.level == nil))
+            .opacity(listener.listening || (parsed.pillar == nil && parsed.level == nil) ? 0.4 : 1)
+        }
+        .padding(.horizontal, 24)
+        .padding(.bottom, 20)
+        .background(Palette.background.ignoresSafeArea())
+        .presentationDetents([.medium, .large])
+        .task { await listener.start() }
+        .onDisappear { listener.stop() }
+    }
+}
+
+/// 홈·기록 화면의 "기둥 위치 말하기" 카드
+struct VoicePillarCard: View {
+    let record: ParkingRecord
+    @State private var open = false
+
+    var body: some View {
+        Button { open = true } label: {
+            HStack(spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(record.pillarText.map { "기둥 \($0)" } ?? "기둥 위치를 말해 보세요")
+                        .font(.system(.headline, design: .rounded)).foregroundStyle(Palette.ink)
+                    Text(record.pillarText == nil ? "눌러서 말하기 · 층도 같이 말하면 층도 고쳐져요" : "눌러서 다시 말하기")
+                        .font(.caption).foregroundStyle(Palette.sub)
+                }
+                Spacer()
+                Image(systemName: "mic.fill")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(Palette.primary)
+                    .frame(width: 52, height: 52)
+                    .background(Palette.soft, in: Circle())
+            }
+            .card(padding: 16)
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $open) { VoicePillarSheet(recordID: record.id) }
+    }
+}

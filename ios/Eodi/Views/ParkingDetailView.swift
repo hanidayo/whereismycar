@@ -16,6 +16,7 @@ struct ParkingDetailView: View {
                 VStack(spacing: 14) {
                     hero(r, color: color)
                     if r.coordinate != nil { placeCard(r) }
+                    VoicePillarCard(record: r)
                     if let c = r.coordinate { mapCard(r, coordinate: c, color: color) }
                     photoCard(r, color: color)
                     infoCard(r)

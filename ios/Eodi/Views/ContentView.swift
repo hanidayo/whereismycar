@@ -31,10 +31,13 @@ struct ContentView: View {
     @EnvironmentObject var store: ParkingStore
     @EnvironmentObject var recorder: DriveRecorder
     var openHistory: () -> Void = {}
-    @State private var selectedCar: UUID?
+    /// 홈에 먼저 보여 줄 차 (이 아이폰에 기억)
+    @AppStorage("homeCarID") private var homeCarID = ""
 
     private var car: Car? {
-        selectedCar.flatMap { store.car($0) } ?? recorder.state.flatMap { store.car($0.carID) } ?? store.cars.first
+        UUID(uuidString: homeCarID).flatMap { store.car($0) }
+            ?? recorder.state.flatMap { store.car($0.carID) }
+            ?? store.cars.first
     }
 
     var body: some View {
@@ -49,10 +52,13 @@ struct ContentView: View {
                                 .font(.system(.title3, design: .rounded).weight(.bold))
                                 .foregroundStyle(Palette.ink)
                             Spacer()
-                            CarPicker(selected: car) { selectedCar = $0 }
+                            CarPicker(selected: car) { homeCarID = $0.uuidString }
                         }
                         .padding(.horizontal, 4)
                         HeroCard(car: car)
+                        if recorder.state?.carID != car.id, let r = store.current(for: car.id) {
+                            VoicePillarCard(record: r)
+                        }
                         SectionHeader(title: "감지 상태")
                         HStack(spacing: 12) {
                             DriveStatusTile(car: car)

@@ -188,6 +188,22 @@ object Store {
     }
 
     /** 실제 층으로 고치고, 그 주차장 학습값에 반영 */
+    /** 음성으로 말한 기둥 번호(·층) 저장. 층을 말했으면 보정으로 처리해 학습에도 반영 */
+    fun applyVoice(id: String, v: kr.hanidayo.eodi.util.PillarSpeech.Result) {
+        val r0 = record(id) ?: return
+        if (v.pillar != null) {
+            update { d -> d.copy(records = d.records.map { if (it.id == id) it.copy(pillarText = v.pillar) else it }) }
+        }
+        if (v.level != null && v.level != r0.level) {
+            correct(id, v.level) // 기둥 번호도 같이 올라감
+        } else {
+            val r = record(id) ?: return
+            if (r.synced) push { it.patchParking(r) }
+        }
+    }
+
+    fun setHomeCar(carId: String) = update { it.copy(homeCarId = carId) }
+
     fun correct(id: String, level: Int) {
         val r0 = record(id) ?: return
         var r = r0.copy(level = level, calibrated = true)
