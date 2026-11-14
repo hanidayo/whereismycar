@@ -121,65 +121,108 @@ struct PlaceEditSheet: View {
 
 // MARK: - 음성으로 기둥 위치
 
-/// 말하면 기둥 번호(·층)를 알아듣고 저장
+/// 말하거나 직접 써서 기둥 번호(·층) 저장. 알아들은 결과는 저장 전에 고칠 수 있음
 struct VoicePillarSheet: View {
     @EnvironmentObject var store: ParkingStore
     @Environment(\.dismiss) private var dismiss
     @StateObject private var listener = SpeechListener()
     let recordID: UUID
+    var listenOnOpen = true
+    @State private var pillar = ""
+    @State private var level: Int?  // nil = 층은 그대로
+    @FocusState private var typing: Bool
 
     var body: some View {
-        let parsed = PillarSpeech.parse(listener.text)
-        VStack(spacing: 22) {
-            Text(listener.listening ? "듣고 있어요…" : (listener.text.isEmpty ? "기둥 위치를 말해 주세요" : "이렇게 들었어요"))
+        VStack(spacing: 18) {
+            Text(listener.listening ? "듣고 있어요…" : "기둥 위치")
                 .font(.system(.title3, design: .rounded).weight(.bold))
                 .foregroundStyle(Palette.ink)
-                .padding(.top, 28)
-            Text("예) \"지하 3층 에이 십이\", \"B2 C 15\", \"가 7번\"")
+                .padding(.top, 24)
+            Text("예) \"지하 3층 에이 십이\", \"알파 3\", \"B2 C 15\"")
                 .font(.footnote).foregroundStyle(Palette.sub)
 
             Button {
+                typing = false
                 if listener.listening { listener.stop() } else { Task { await listener.start() } }
             } label: {
                 ZStack {
                     Circle().fill(Palette.primary.opacity(listener.listening ? 0.18 : 0.10))
-                        .frame(width: 128, height: 128)
+                        .frame(width: 112, height: 112)
                         .scaleEffect(listener.listening ? 1.12 : 1)
                         .animation(listener.listening ? .easeInOut(duration: 0.8).repeatForever(autoreverses: true) : .default,
                                    value: listener.listening)
                     Circle().fill(LinearGradient(colors: [Palette.primary, Palette.primaryDeep], startPoint: .top, endPoint: .bottom))
-                        .frame(width: 88, height: 88)
+                        .frame(width: 78, height: 78)
                     Image(systemName: listener.listening ? "stop.fill" : "mic.fill")
-                        .font(.system(size: 34, weight: .bold)).foregroundStyle(.white)
+                        .font(.system(size: 30, weight: .bold)).foregroundStyle(.white)
                 }
             }
             .buttonStyle(.plain)
 
             if !listener.text.isEmpty {
-                Text("“\(listener.text)”").font(.body).foregroundStyle(Palette.ink).multilineTextAlignment(.center)
-                HStack(spacing: 10) {
-                    if let l = parsed.level { Chip(text: Level.longName(l), systemImage: "stairs", color: Palette.primary) }
-                    if let p = parsed.pillar { Chip(text: "기둥 \(p)", systemImage: "number", color: Color(hex: 0x2E9E6E)) }
+                Text("“\(listener.text)”").font(.subheadline).foregroundStyle(Palette.sub).multilineTextAlignment(.center)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("기둥 번호 · 틀렸으면 직접 고쳐 주세요").font(.caption).foregroundStyle(Palette.sub)
+                TextField("예: A12", text: $pillar)
+                    .font(.system(.title2, design: .rounded).weight(.heavy))
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+                    .focused($typing)
+                    .padding(.horizontal, 16).padding(.vertical, 12)
+                    .background(Palette.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                HStack {
+                    Text("층").foregroundStyle(Palette.ink)
+                    Spacer()
+                    Menu {
+                        Button("그대로 두기") { level = nil }
+                        ForEach(Array((-6...4).reversed()), id: \.self) { l in
+                            Button(Level.longName(l)) { level = l }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(level.map { Level.longName($0) } ?? "그대로")
+                            Image(systemName: "chevron.up.chevron.down").font(.caption)
+                        }
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(Palette.primary)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(Palette.soft, in: Capsule())
+                    }
                 }
             }
+
             if let e = listener.error { Text(e).font(.footnote).foregroundStyle(.orange) }
-            Spacer()
+            Spacer(minLength: 0)
+            let empty = pillar.trimmingCharacters(in: .whitespaces).isEmpty && level == nil
             Button {
-                store.applyVoice(recordID, parsed)
+                let p = pillar.trimmingCharacters(in: .whitespaces).uppercased()
+                store.applyVoice(recordID, PillarSpeech.Result(level: level, pillar: p.isEmpty ? nil : p))
                 dismiss()
             } label: {
                 Text("저장").font(.headline).frame(maxWidth: .infinity).padding(.vertical, 15)
                     .foregroundStyle(.white)
                     .background(Palette.primary, in: Capsule())
             }
-            .disabled(listener.listening || (parsed.pillar == nil && parsed.level == nil))
-            .opacity(listener.listening || (parsed.pillar == nil && parsed.level == nil) ? 0.4 : 1)
+            .disabled(listener.listening || empty)
+            .opacity(listener.listening || empty ? 0.4 : 1)
         }
         .padding(.horizontal, 24)
         .padding(.bottom, 20)
         .background(Palette.background.ignoresSafeArea())
-        .presentationDetents([.medium, .large])
-        .task { await listener.start() }
+        .presentationDetents([.large])
+        .onChange(of: listener.alternatives) { _, alts in
+            // 인식 후보 중 기둥 번호를 알아들은 첫 문장
+            let all = alts.isEmpty ? [listener.text] : alts
+            let best = all.map(PillarSpeech.parse).first { $0.pillar != nil } ?? PillarSpeech.parse(listener.text)
+            if let p = best.pillar { pillar = p }
+            if let l = best.level { level = l }
+        }
+        .task {
+            if pillar.isEmpty { pillar = store.record(recordID)?.pillarText ?? "" }
+            if listenOnOpen { await listener.start() } else { typing = true }
+        }
         .onDisappear { listener.stop() }
     }
 }

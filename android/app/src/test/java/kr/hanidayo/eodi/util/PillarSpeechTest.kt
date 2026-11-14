@@ -15,6 +15,13 @@ class PillarSpeechTest {
         check("에이 2", null, "A2")
         check("B 12", null, "B12")
         check("기둥 가 7번", null, "가7")
+        check("애이 십이", null, "A12")
+        check("알파 3", null, "A3")
+        check("찰리 15", null, "C15")
+        check("시 15", null, "C15")
+        check("에이취 23", null, "H23")
+        check("쥐 칠", null, "G7")
+        check("지하 2층 브라보 7", -2, "B7")
     }
 
     @Test fun withLevel() {

@@ -239,22 +239,60 @@ struct DriveStatusTile: View {
     }
 }
 
+/// 화면을 열 때 지금 위치를 새로 받음 (예전에 저장된 위치로 거리를 재면 틀림)
+@MainActor
+final class FreshLocation: NSObject, ObservableObject, CLLocationManagerDelegate {
+    @Published private(set) var location: CLLocation?
+    private let manager = CLLocationManager()
+    private var stopTask: Task<Void, Never>?
+
+    func request() {
+        manager.delegate = self
+        manager.desiredAccuracy = kCLLocationAccuracyBest
+        manager.startUpdatingLocation()
+        stopTask?.cancel()
+        stopTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 20_000_000_000)
+            self?.manager.stopUpdatingLocation()
+        }
+    }
+
+    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        Task { @MainActor in
+            for l in locations where l.horizontalAccuracy > 0 && -l.timestamp.timeIntervalSinceNow < 30 {
+                if location == nil || l.horizontalAccuracy <= (location?.horizontalAccuracy ?? .infinity) + 5 {
+                    location = l
+                }
+            }
+            if let l = location, l.horizontalAccuracy <= 15 { self.manager.stopUpdatingLocation() }
+        }
+    }
+
+    nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {}
+}
+
 struct DistanceTile: View {
     @EnvironmentObject var store: ParkingStore
-    @EnvironmentObject var recorder: DriveRecorder
+    @StateObject private var here = FreshLocation()
     let car: Car
 
     var body: some View {
-        let meters: Double? = {
-            guard let c = store.current(for: car.id)?.coordinate, let here = recorder.lastKnownLocation else { return nil }
-            return CLLocation(latitude: c.latitude, longitude: c.longitude).distance(from: here)
+        let record = store.current(for: car.id)
+        let detail: String = {
+            guard let c = record?.coordinate else { return record == nil ? "기록 없음" : "위치 없음" }
+            guard let h = here.location else { return "위치 받는 중…" }
+            let m = CLLocation(latitude: c.latitude, longitude: c.longitude).distance(from: h)
+            // 오차보다 가까우면 거리 대신 "근처"
+            if m <= max(h.horizontalAccuracy, 30) { return "바로 근처" }
+            return "\(Self.format(m)) · ±\(Int(h.horizontalAccuracy))m"
         }()
-        StatusTile(title: "위치 상태", value: "차와의 거리", detail: meters.map(Self.format) ?? "알 수 없음") {
+        StatusTile(title: "주차장 입구까지", value: "차와의 거리", detail: detail) {
             ZStack {
                 Circle().fill(Color(hex: 0x5AA9F5).opacity(0.15))
                 Image(systemName: "mappin.and.ellipse").font(.title3.weight(.semibold)).foregroundStyle(Color(hex: 0x3F8EE8))
             }
         }
+        .onAppear { here.request() }
     }
 
     static func format(_ m: Double) -> String {

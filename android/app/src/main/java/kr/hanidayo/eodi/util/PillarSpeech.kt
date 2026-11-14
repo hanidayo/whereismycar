@@ -8,6 +8,10 @@ object PillarSpeech {
     data class Result(val level: Int?, val pillar: String?)
 
     private val letters = listOf(
+        // 잘못 알아듣기 쉬운 발음·군대식 알파벳 먼저
+        "폭스트롯" to "F", "에이취" to "H", "알파" to "A", "브라보" to "B", "찰리" to "C", "델타" to "D", "에코" to "E",
+        "골프" to "G", "호텔" to "H", "애이" to "A", "에치" to "H", "재이" to "J", "캐이" to "K", "앨" to "L", "앰" to "M",
+        "앤" to "N", "쥐" to "G", "뒤" to "D", "시" to "C",
         "더블유" to "W", "에이치" to "H", "에이" to "A", "에프" to "F", "에스" to "S", "엑스" to "X", "와이" to "Y",
         "브이" to "V", "제트" to "Z", "지트" to "Z", "제이" to "J", "케이" to "K", "엘" to "L", "엠" to "M", "엔" to "N",
         "큐" to "Q", "알" to "R", "티" to "T", "유" to "U", "피" to "P", "디" to "D", "씨" to "C", "비" to "B",

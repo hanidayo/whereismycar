@@ -88,6 +88,16 @@ data class RemoteState(
     val cars: List<Car> = emptyList(),
     val parkings: List<ParkingRecord> = emptyList(),
     val garages: List<GarageProfile> = emptyList(),
+    /** 지우거나(다른 폰 포함) 같은 차 중복이라 합쳐진 기록 */
+    val deleted: List<String> = emptyList(),
+)
+
+/** POST 결과: 같은 차를 다른 폰이 먼저 기록했으면 그 기록으로 합쳐짐 */
+@kotlinx.serialization.Serializable
+data class PostResult(
+    val created: Boolean? = null,
+    @kotlinx.serialization.SerialName("merged_into") val mergedInto: String? = null,
+    val deleted: Boolean? = null,
 )
 
 @Serializable

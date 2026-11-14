@@ -8,7 +8,7 @@ import os
 import secrets
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -57,6 +57,11 @@ _db.executescript(
     CREATE TABLE IF NOT EXISTS garages (
         id TEXT PRIMARY KEY, latitude REAL NOT NULL, longitude REAL NOT NULL, name TEXT,
         samples TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS deleted_parkings (
+        id TEXT PRIMARY KEY,           -- 지운 기록 / 같은 차 중복이라 합친 기록
+        merged_into TEXT,
+        deleted_at TEXT NOT NULL
+    );
     """
 )
 # 진입 방향(도) — 같은 주차장의 입구 구분용. 예전 DB에는 없어서 추가
@@ -318,7 +323,11 @@ def state():
                JOIN (SELECT car_id, MAX(date) AS d FROM parkings GROUP BY car_id) last
                  ON p.car_id = last.car_id AND p.date = last.d""")]
         garages = [garage_out(r) for r in _db.execute("SELECT * FROM garages")]
-    return {"cars": cars, "parkings": parkings, "garages": garages, "server_time": now_iso()}
+        # 지우거나 합친 기록 → 각 폰이 자기 목록에서도 지움 (최근 60일)
+        deleted = [r["id"] for r in _db.execute(
+            "SELECT id FROM deleted_parkings WHERE deleted_at >= ?",
+            ((datetime.now(timezone.utc) - timedelta(days=60)).strftime("%Y-%m-%dT%H:%M:%SZ"),))]
+    return {"cars": cars, "parkings": parkings, "garages": garages, "deleted": deleted, "server_time": now_iso()}
 
 
 @app.put("/api/cars/{car_id}", dependencies=[Depends(auth)])
@@ -352,11 +361,49 @@ def list_parkings(car_id: Optional[str] = None, limit: int = 30):
         return [parking_out(r) for r in rows]
 
 
+# 같은 차를 이 시간 안에 두 폰이 기록하면(같이 타고 있었음) 하나로 합침
+DUPLICATE_WINDOW_SEC = 10 * 60
+
+
+def _tombstone(pid: str, merged_into: Optional[str] = None):
+    _db.execute("INSERT OR REPLACE INTO deleted_parkings(id, merged_into, deleted_at) VALUES(?,?,?)",
+                (pid, merged_into, now_iso()))
+
+
+def _find_duplicate(pid: str, cid: str, date: str):
+    t = datetime.fromisoformat(date.replace("Z", "+00:00"))
+    for r in _db.execute("SELECT * FROM parkings WHERE car_id=? AND id<>? ORDER BY date DESC LIMIT 5", (cid, pid)):
+        other = datetime.fromisoformat(r["date"].replace("Z", "+00:00"))
+        if abs((other - t).total_seconds()) <= DUPLICATE_WINDOW_SEC:
+            return r
+    return None
+
+
 @app.post("/api/parkings", dependencies=[Depends(auth)])
 def post_parking(body: ParkingIn, tasks: BackgroundTasks):
     pid, cid, date = nid(body.id), nid(body.car_id), norm_date(body.date)
     with _lock, _db:
+        gone = _db.execute("SELECT merged_into FROM deleted_parkings WHERE id=?", (pid,)).fetchone()
+        if gone:
+            return {"ok": True, "created": False, "deleted": True, "merged_into": gone["merged_into"]}
         existed = _db.execute("SELECT 1 FROM parkings WHERE id=?", (pid,)).fetchone()
+        dup = None if existed else _find_duplicate(pid, cid, date)
+        if dup is not None:
+            # 먼저 올라온 기록을 남기고, 측정이 더 나으면(층이 없었거나 입구 GPS가 더 정확) 그 값으로 갱신
+            better = body.level is not None and not dup["calibrated"] and (
+                dup["level"] is None
+                or (body.accuracy is not None and dup["accuracy"] is not None and body.accuracy + 5 < dup["accuracy"]))
+            if better:
+                _db.execute(
+                    """UPDATE parkings SET latitude=?, longitude=?, accuracy=?, delta_meters=?, level=?,
+                       course=?, updated_at=? WHERE id=?""",
+                    (body.latitude, body.longitude, body.accuracy, body.delta_meters, body.level,
+                     body.course, now_iso(), dup["id"]))
+            if body.pillar_text and not dup["pillar_text"]:
+                _db.execute("UPDATE parkings SET pillar_text=?, updated_at=? WHERE id=?",
+                            (body.pillar_text, now_iso(), dup["id"]))
+            _tombstone(pid, dup["id"])
+            return {"ok": True, "created": False, "merged_into": dup["id"]}
         _db.execute(
             """INSERT INTO parkings(id, car_id, member, date, latitude, longitude, accuracy,
                    delta_meters, level, calibrated, pillar_text, ocr_level, course, updated_at)
@@ -375,6 +422,16 @@ def post_parking(body: ParkingIn, tasks: BackgroundTasks):
                        body.latitude, body.longitude, 4,
                        {"type": "parked", "parking_id": pid, "car_id": cid})
     return {"ok": True, "created": not existed}
+
+
+@app.delete("/api/parkings/{parking_id}", dependencies=[Depends(auth)])
+def delete_parking(parking_id: str):
+    pid = nid(parking_id)
+    with _lock, _db:
+        _db.execute("DELETE FROM parkings WHERE id=?", (pid,))
+        _tombstone(pid)
+    (PHOTO_DIR / f"{pid}.jpg").unlink(missing_ok=True)
+    return {"ok": True}
 
 
 @app.patch("/api/parkings/{parking_id}", dependencies=[Depends(auth)])

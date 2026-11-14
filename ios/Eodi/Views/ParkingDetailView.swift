@@ -8,6 +8,14 @@ struct ParkingDetailView: View {
     @State private var showCamera = false
     @State private var analyzing = false
     @State private var editingPlace = false
+    @State private var pillarInput: PillarInput?
+    @State private var confirmDelete = false
+    @Environment(\.dismiss) private var dismiss
+
+    enum PillarInput: String, Identifiable {
+        case voice, keyboard
+        var id: String { rawValue }
+    }
 
     var body: some View {
         if let r = store.record(recordID) {
@@ -16,9 +24,8 @@ struct ParkingDetailView: View {
                 VStack(spacing: 14) {
                     hero(r, color: color)
                     if r.coordinate != nil { placeCard(r) }
-                    VoicePillarCard(record: r)
+                    pillarCard(r, color: color)
                     if let c = r.coordinate { mapCard(r, coordinate: c, color: color) }
-                    photoCard(r, color: color)
                     infoCard(r)
                 }
                 .padding(16)
@@ -38,12 +45,28 @@ struct ParkingDetailView: View {
                                 }
                             }
                         }
+                        Section {
+                            Button(role: .destructive) { confirmDelete = true } label: {
+                                Label("기록 삭제", systemImage: "trash")
+                            }
+                        }
                     } label: {
-                        Image(systemName: "car.2")
+                        Image(systemName: "ellipsis.circle")
                     }
                 }
             }
             .task { await store.fetchRemotePhoto(recordID) }
+            .sheet(item: $pillarInput) { mode in
+                VoicePillarSheet(recordID: recordID, listenOnOpen: mode == .voice)
+            }
+            .confirmationDialog("이 주차 기록을 지울까요?", isPresented: $confirmDelete, titleVisibility: .visible) {
+                Button("삭제", role: .destructive) {
+                    store.deleteRecord(recordID)
+                    dismiss()
+                }
+            } message: {
+                Text("가족 폰에서도 지워져요.")
+            }
             .sheet(isPresented: $editingPlace) {
                 let g = store.place(for: r)
                 PlaceEditSheet(recordID: recordID, name: g?.name, icon: g?.icon)
@@ -143,9 +166,17 @@ struct ParkingDetailView: View {
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
-    private func photoCard(_ r: ParkingRecord, color: Color) -> some View {
+    /// 기둥 위치: 번호 + 사진 + [사진][말하기][키보드]
+    private func pillarCard(_ r: ParkingRecord, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("기둥 사진").font(.headline)
+            HStack {
+                Text("기둥 위치").font(.headline)
+                Spacer()
+                Text(r.pillarText ?? "아직 없어요")
+                    .font(.system(r.pillarText == nil ? .subheadline : .title3, design: .rounded)
+                        .weight(r.pillarText == nil ? .regular : .heavy))
+                    .foregroundStyle(r.pillarText == nil ? Palette.sub : color)
+            }
             if let img = store.photo(for: r) {
                 Image(uiImage: img).resizable().scaledToFill()
                     .frame(maxWidth: .infinity).frame(height: 220)
@@ -154,13 +185,31 @@ struct ParkingDetailView: View {
                 ProgressView("사진 받는 중…").frame(maxWidth: .infinity, minHeight: 80)
             }
             if analyzing { ProgressView("글자 읽는 중…") }
-            Button { showCamera = true } label: {
-                Label(r.photoFile == nil ? "기둥 사진 찍기" : "다시 찍기", systemImage: "camera.fill")
-                    .frame(maxWidth: .infinity)
+            HStack(spacing: 10) {
+                pillarButton(r.photoFile == nil ? "사진" : "다시 찍기", "camera.fill") { showCamera = true }
+                pillarButton("말하기", "mic.fill") { pillarInput = .voice }
+                Button { pillarInput = .keyboard } label: {
+                    Image(systemName: "keyboard")
+                        .font(.headline)
+                        .foregroundStyle(Palette.primary)
+                        .frame(width: 48, height: 48)
+                        .background(Palette.soft, in: Circle())
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.bordered).controlSize(.large).tint(color)
         }
         .card()
+    }
+
+    private func pillarButton(_ title: String, _ icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(Palette.primary)
+                .frame(maxWidth: .infinity).frame(height: 48)
+                .background(Palette.soft, in: Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     private func infoCard(_ r: ParkingRecord) -> some View {

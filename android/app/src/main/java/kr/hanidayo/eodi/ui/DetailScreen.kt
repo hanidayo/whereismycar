@@ -1,5 +1,10 @@
 package kr.hanidayo.eodi.ui
 
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Delete
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -99,6 +104,20 @@ fun DetailScreen(recordId: String, onBack: () -> Unit) {
     ) {
         Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "뒤로") }
+            var confirmDelete by remember { mutableStateOf(false) }
+            if (confirmDelete) {
+                AlertDialog(
+                    onDismissRequest = { confirmDelete = false },
+                    title = { Text("이 주차 기록을 지울까요?") },
+                    text = { Text("가족 폰에서도 지워져요.") },
+                    confirmButton = {
+                        TextButton(onClick = { confirmDelete = false; Store.deleteRecord(r.id); onBack() }) {
+                            Text("삭제", color = Color(0xFFEF5350))
+                        }
+                    },
+                    dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("취소") } },
+                )
+            }
             Text(carName, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
             var carMenu by remember { mutableStateOf(false) }
             Box {
@@ -115,6 +134,7 @@ fun DetailScreen(recordId: String, onBack: () -> Unit) {
                     }
                 }
             }
+            IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Filled.Delete, "기록 삭제", tint = Eodi.colors.secondaryText) }
         }
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).navigationBarsPadding(),
@@ -122,7 +142,6 @@ fun DetailScreen(recordId: String, onBack: () -> Unit) {
         ) {
             Hero(r, color)
             if (r.hasLocation) PlaceCard(r)
-            VoicePillarCard(r)
             if (r.hasLocation) LocationCard(r, carName)
             PhotoCard(r, color)
             EodiCard {
@@ -257,8 +276,15 @@ private fun PhotoCard(r: ParkingRecord, color: Color) {
         }
     }
 
+    val input = rememberPillarInput(r)
     EodiCard {
-        Text("기둥 사진", style = MaterialTheme.typography.titleMedium)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("기둥 위치", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            Text(r.pillarText ?: "아직 없어요",
+                color = if (r.pillarText == null) Eodi.colors.secondaryText else color,
+                fontSize = if (r.pillarText == null) 14.sp else 20.sp,
+                fontWeight = if (r.pillarText == null) FontWeight.Normal else FontWeight.Black)
+        }
         Spacer(Modifier.height(12.dp))
         when {
             bitmap != null -> Image(
@@ -278,17 +304,29 @@ private fun PhotoCard(r: ParkingRecord, color: Color) {
             }
         }
         Spacer(Modifier.height(12.dp))
-        FilledTonalButton(
-            onClick = {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            PillarButton(if (r.photoFile == null) "사진" else "다시 찍기", Icons.Filled.CameraAlt, Modifier.weight(1f)) {
                 val f = Store.newPhotoFile(r.id)
                 pending = f
                 camera.launch(FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", f))
-            },
-            modifier = Modifier.fillMaxWidth().height(48.dp),
-            colors = ButtonDefaults.filledTonalButtonColors(containerColor = color.copy(alpha = 0.14f), contentColor = color),
-        ) {
-            Icon(Icons.Filled.CameraAlt, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp))
-            Text(if (r.photoFile == null) "기둥 사진 찍기" else "다시 찍기")
+            }
+            PillarButton("말하기", Icons.Filled.Mic, Modifier.weight(1f)) { input.listen() }
+            Box(
+                Modifier.size(48.dp).clip(CircleShape).background(Eodi.colors.soft).clickable { input.type() },
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.Keyboard, "직접 입력", tint = Eodi.colors.primary) }
         }
+    }
+}
+
+@Composable
+private fun PillarButton(text: String, icon: androidx.compose.ui.graphics.vector.ImageVector, modifier: Modifier, onClick: () -> Unit) {
+    Row(
+        modifier.height(48.dp).clip(RoundedCornerShape(50)).background(Eodi.colors.soft).clickable(onClick = onClick),
+        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = Eodi.colors.primary, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(text, color = Eodi.colors.primary, fontWeight = FontWeight.Bold)
     }
 }

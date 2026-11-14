@@ -5,6 +5,8 @@ import Speech
 @MainActor
 final class SpeechListener: ObservableObject {
     @Published private(set) var text = ""
+    /// 인식 후보들 (첫 번째가 가장 그럴듯함)
+    @Published private(set) var alternatives: [String] = []
     @Published private(set) var listening = false
     @Published private(set) var error: String?
 
@@ -33,7 +35,9 @@ final class SpeechListener: ObservableObject {
 
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
-        req.contextualStrings = ["지하", "층", "기둥", "에이", "비", "씨", "디", "이", "에프", "지"]
+        req.contextualStrings = ["지하", "층", "기둥", "에이", "비", "씨", "디", "에프", "지", "에이치",
+                                 "에이 1", "비 2", "씨 3", "디 4", "지하 1층", "지하 2층", "지하 3층", "지하 4층"]
+        req.taskHint = .search
         request = req
 
         let input = engine.inputNode
@@ -45,6 +49,7 @@ final class SpeechListener: ObservableObject {
         do { try engine.start() } catch { self.error = "마이크를 켤 수 없어요"; cleanup(); return }
 
         text = ""
+        alternatives = []
         listening = true
         scheduleSilenceStop(after: 6)  // 아무 말도 안 하면 6초 뒤 끝
         task = recognizer.recognitionTask(with: req) { [weak self] result, err in
@@ -52,6 +57,7 @@ final class SpeechListener: ObservableObject {
                 guard let self else { return }
                 if let result {
                     self.text = result.bestTranscription.formattedString
+                    self.alternatives = result.transcriptions.map(\.formattedString)
                     self.scheduleSilenceStop(after: 1.6)  // 말을 멈추면 끝
                     if result.isFinal { self.stop() }
                 }

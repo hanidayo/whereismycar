@@ -20,7 +20,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -60,18 +65,26 @@ fun VoicePillarCard(record: ParkingRecord) {
     }
 }
 
-/** 구글 음성 인식 → 층·기둥 번호 확인 대화상자 → 저장. 반환값을 부르면 듣기 시작 */
+/** 구글 음성 인식으로 듣기 (홈 마이크 버튼용) */
 @Composable
-fun rememberVoicePillar(record: ParkingRecord?): () -> Unit {
+fun rememberVoicePillar(record: ParkingRecord?): () -> Unit = rememberPillarInput(record).listen
+
+class PillarInput(val listen: () -> Unit, val type: () -> Unit)
+
+private data class PillarDraft(val heard: String?, val pillar: String, val level: Int?)
+
+/** 말하기(구글 음성 인식)·직접 쓰기 → 결과를 고칠 수 있는 확인 창 → 저장 */
+@Composable
+fun rememberPillarInput(record: ParkingRecord?): PillarInput {
     val ctx = LocalContext.current
-    var heard by remember { mutableStateOf<Pair<String, PillarSpeech.Result>?>(null) }
+    var draft by remember { mutableStateOf<PillarDraft?>(null) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
-        if (res.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
+        if (res.resultCode != Activity.RESULT_OK || record == null) return@rememberLauncherForActivityResult
         val candidates = res.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS).orEmpty()
         // 후보 중 기둥 번호를 알아들은 첫 문장
-        val best = candidates.map { it to PillarSpeech.parse(it) }
-            .firstOrNull { it.second.pillar != null || it.second.level != null }
-        heard = best ?: candidates.firstOrNull()?.let { it to PillarSpeech.Result(null, null) }
+        val best = candidates.map { it to PillarSpeech.parse(it) }.firstOrNull { it.second.pillar != null }
+            ?: candidates.firstOrNull()?.let { it to PillarSpeech.parse(it) }
+        draft = PillarDraft(best?.first, best?.second?.pillar ?: record.pillarText.orEmpty(), best?.second?.level)
     }
     fun listen() {
         if (record == null) return
@@ -83,36 +96,75 @@ fun rememberVoicePillar(record: ParkingRecord?): () -> Unit {
         try {
             launcher.launch(i)
         } catch (_: ActivityNotFoundException) {
-            Toast.makeText(ctx, "이 폰에서는 음성 인식을 쓸 수 없어요", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, "이 폰에서는 음성 인식을 쓸 수 없어요. 직접 입력해 주세요.", Toast.LENGTH_SHORT).show()
+            draft = PillarDraft(null, record.pillarText.orEmpty(), null)
         }
     }
+    fun type() {
+        if (record != null) draft = PillarDraft(null, record.pillarText.orEmpty(), null)
+    }
 
-    heard?.let { (text, parsed) ->
-        AlertDialog(
-            onDismissRequest = { heard = null },
-            containerColor = Eodi.colors.card,
-            title = { Text("이렇게 들었어요") },
-            text = {
-                Column {
-                    Text("“$text”", color = Eodi.colors.ink)
-                    Spacer(Modifier.size(12.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        parsed.level?.let { Chip(longLevelName(it), Eodi.colors.primary) }
-                        parsed.pillar?.let { Chip("기둥 $it", Color(0xFF2E9E6E)) }
-                    }
-                    if (parsed.level == null && parsed.pillar == null) {
-                        Text("기둥 번호를 못 알아들었어요. 다시 말해 주세요.", color = Color(0xFFE67E22), fontSize = 13.sp)
-                    }
-                }
+    draft?.let { d ->
+        PillarDialog(
+            d,
+            onDismiss = { draft = null },
+            onRetry = { draft = null; listen() },
+            onSave = { pillar, level ->
+                val p = pillar.trim().uppercase().ifEmpty { null }
+                record?.let { Store.applyVoice(it.id, PillarSpeech.Result(level, p)) }
+                draft = null
             },
-            confirmButton = {
-                TextButton(
-                    enabled = parsed.level != null || parsed.pillar != null,
-                    onClick = { record?.let { Store.applyVoice(it.id, parsed) }; heard = null },
-                ) { Text("저장") }
-            },
-            dismissButton = { TextButton(onClick = { heard = null; listen() }) { Text("다시 말하기") } },
         )
     }
-    return ::listen
+    return PillarInput(::listen, ::type)
+}
+
+@Composable
+private fun PillarDialog(d: PillarDraft, onDismiss: () -> Unit, onRetry: () -> Unit, onSave: (String, Int?) -> Unit) {
+    var pillar by remember(d) { mutableStateOf(d.pillar) }
+    var level by remember(d) { mutableStateOf(d.level) }
+    var levelMenu by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Eodi.colors.card,
+        title = { Text("기둥 위치") },
+        text = {
+            Column {
+                if (d.heard != null) {
+                    Text("“${d.heard}”", color = Eodi.colors.secondaryText, fontSize = 13.sp)
+                    Spacer(Modifier.size(10.dp))
+                }
+                OutlinedTextField(
+                    pillar, { pillar = it.uppercase() },
+                    label = { Text("기둥 번호 · 틀렸으면 고쳐 주세요") },
+                    placeholder = { Text("예: A12") },
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 22.sp, fontWeight = FontWeight.ExtraBold),
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters),
+                )
+                Spacer(Modifier.size(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("층", color = Eodi.colors.ink, modifier = Modifier.weight(1f))
+                    Box {
+                        Text(
+                            (level?.let { longLevelName(it) } ?: "그대로") + " ▾",
+                            color = Eodi.colors.primary, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clip(RoundedCornerShape(50)).background(Eodi.colors.soft)
+                                .clickable { levelMenu = true }.padding(horizontal = 14.dp, vertical = 8.dp),
+                        )
+                        DropdownMenu(expanded = levelMenu, onDismissRequest = { levelMenu = false }) {
+                            DropdownMenuItem(text = { Text("그대로 두기") }, onClick = { level = null; levelMenu = false })
+                            (4 downTo -6).forEach { l ->
+                                DropdownMenuItem(text = { Text(longLevelName(l)) }, onClick = { level = l; levelMenu = false })
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = pillar.isNotBlank() || level != null, onClick = { onSave(pillar, level) }) { Text("저장") }
+        },
+        dismissButton = { TextButton(onClick = onRetry) { Text("말하기") } },
+    )
 }

@@ -282,6 +282,21 @@ final class ParkingStore: ObservableObject {
         await uploadPending()
     }
 
+    /// 기록 지우기 (가족 폰에서도 지워짐)
+    func deleteRecord(_ id: UUID) {
+        guard let r = record(id) else { return }
+        removeLocal(id)
+        if r.synced { push { try await $0.deleteParking(id) } }
+    }
+
+    private func removeLocal(_ id: UUID) {
+        if let f = record(id)?.photoFile {
+            try? FileManager.default.removeItem(at: Self.photoDir.appendingPathComponent(f))
+        }
+        records.removeAll { $0.id == id }
+        for gi in garages.indices { garages[gi].samples.removeAll { $0.recordID == id } }
+    }
+
     func photo(for r: ParkingRecord) -> UIImage? {
         guard let f = r.photoFile else { return nil }
         return UIImage(contentsOfFile: Self.photoDir.appendingPathComponent(f).path)
@@ -330,7 +345,8 @@ final class ParkingStore: ObservableObject {
                 }
             }
 
-            var merged = records
+            let gone = Set(remote.deleted ?? [])
+            var merged = records.filter { !gone.contains($0.id.uuidString.lowercased()) }
             for rp in remote.parkings {
                 if let i = merged.firstIndex(where: { $0.id.uuidString.lowercased() == rp.id }) {
                     merged[i].apply(remote: rp)
@@ -356,9 +372,21 @@ final class ParkingStore: ObservableObject {
     func uploadPending() async {
         guard let client = SyncClient(settings: sync) else { return }
         do {
+            var mergedAway = false
             for r in records where !r.synced {
-                try await client.postParking(r)
-                if let i = records.firstIndex(where: { $0.id == r.id }) { records[i].synced = true }
+                let res = try await client.postParking(r)
+                if res.mergedInto != nil || res.deleted == true {
+                    // 같이 탄 가족 폰이 먼저 기록함(또는 지워진 기록) → 내 것은 지우고 서버 기록을 받음
+                    removeLocal(r.id)
+                    mergedAway = true
+                } else if let i = records.firstIndex(where: { $0.id == r.id }) {
+                    records[i].synced = true
+                }
+            }
+            if mergedAway, let remote = try? await client.state() {
+                for rp in remote.parkings where !records.contains(where: { $0.id.uuidString.lowercased() == rp.id }) {
+                    if let nr = ParkingRecord(remote: rp) { records.append(nr) }
+                }
             }
             for r in records where r.synced && r.photoPending {
                 guard let img = photo(for: r), let jpeg = img.jpegData(compressionQuality: 0.7) else { continue }

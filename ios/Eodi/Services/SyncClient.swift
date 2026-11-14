@@ -51,6 +51,15 @@ struct RemoteState: Codable {
     var cars: [RemoteCar]
     var parkings: [RemoteParking]
     var garages: [RemoteGarage]
+    /// 지우거나(다른 폰 포함) 같은 차 중복이라 합쳐진 기록
+    var deleted: [String]?
+}
+
+/// POST 결과: 같은 차를 다른 폰이 먼저 기록했으면 그 기록으로 합쳐짐
+struct PostResult: Codable {
+    var created: Bool?
+    var mergedInto: String?
+    var deleted: Bool?
 }
 
 private struct ParkingPatchBody: Encodable {
@@ -131,13 +140,19 @@ struct SyncClient {
         _ = try await send("api/cars/\(Self.key(id))", method: "DELETE")
     }
 
-    func postParking(_ r: ParkingRecord) async throws {
+    @discardableResult
+    func postParking(_ r: ParkingRecord) async throws -> PostResult {
         let body = RemoteParking(id: Self.key(r.id), carId: Self.key(r.carID), member: r.member,
                                  date: r.date, latitude: r.latitude, longitude: r.longitude,
                                  accuracy: r.accuracy, deltaMeters: r.deltaMeters, level: r.level,
                                  calibrated: r.calibrated, pillarText: r.pillarText,
                                  ocrLevel: r.ocrLevel, hasPhoto: nil, course: r.course)
-        _ = try await send("api/parkings", method: "POST", json: body)
+        let data = try await send("api/parkings", method: "POST", json: body)
+        return (try? Self.decoder.decode(PostResult.self, from: data)) ?? PostResult()
+    }
+
+    func deleteParking(_ id: UUID) async throws {
+        _ = try await send("api/parkings/\(Self.key(id))", method: "DELETE")
     }
 
     func patchParking(_ r: ParkingRecord) async throws {

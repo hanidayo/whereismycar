@@ -80,8 +80,13 @@ class SyncClient private constructor(settings: SyncSettings) {
         send("api/cars/$id", "DELETE")
     }
 
-    suspend fun postParking(r: ParkingRecord) {
-        send("api/parkings", "POST", json(r))
+    suspend fun postParking(r: ParkingRecord): PostResult {
+        val bytes = send("api/parkings", "POST", json(r))
+        return runCatching { Store.json.decodeFromString<PostResult>(bytes.decodeToString()) }.getOrDefault(PostResult())
+    }
+
+    suspend fun deleteParking(id: String) {
+        send("api/parkings/$id", "DELETE")
     }
 
     suspend fun patchParking(r: ParkingRecord) {

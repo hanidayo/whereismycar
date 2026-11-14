@@ -79,4 +79,31 @@ m2 = importlib.import_module("app.main")
 cols = {r[1] for r in m2._db.execute("PRAGMA table_info(garages)")}
 assert {"course", "icon"} <= cols, cols
 
+# ---- 같은 차를 두 폰이 10분 안에 기록하면 하나로 합침
+ok(c.put("/api/cars/car-c", json={"name": "차3", "color": 2}, headers=H))
+r1 = ok(c.post("/api/parkings", json={"id": "d-1", "car_id": "car-c", "member": "한스", "date": "2026-11-14T10:00:00Z",
+                                      "level": None, "accuracy": 20}, headers=H))
+assert r1["created"], r1
+r2 = ok(c.post("/api/parkings", json={"id": "d-2", "car_id": "car-c", "member": "가족", "date": "2026-11-14T10:03:00Z",
+                                      "level": -2, "accuracy": 8, "pillar_text": "A2"}, headers=H))
+assert r2["created"] is False and r2["merged_into"] == "d-1", r2
+st = ok(c.get("/api/state", headers=H))
+p3 = [p for p in st["parkings"] if p["car_id"] == "car-c"][0]
+assert p3["id"] == "d-1" and p3["level"] == -2 and p3["pillar_text"] == "A2", p3
+assert "d-2" in st["deleted"], st["deleted"]
+# 같은 기록을 다시 올려도(재시도) 합친 결과 유지
+r2b = ok(c.post("/api/parkings", json={"id": "d-2", "car_id": "car-c", "member": "가족", "date": "2026-11-14T10:03:00Z"},
+                headers=H))
+assert r2b["merged_into"] == "d-1", r2b
+# 20분 뒤는 다른 주차
+r3 = ok(c.post("/api/parkings", json={"id": "d-3", "car_id": "car-c", "member": "한스", "date": "2026-11-14T10:30:00Z"},
+               headers=H))
+assert r3["created"], r3
+
+# ---- 삭제
+ok(c.delete("/api/parkings/D-3", headers=H))
+st = ok(c.get("/api/state", headers=H))
+assert "d-3" in st["deleted"], st
+assert [p for p in st["parkings"] if p["car_id"] == "car-c"][0]["id"] == "d-1"
+
 print("서버 테스트 통과")

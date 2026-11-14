@@ -140,7 +140,8 @@ fun LocationScreen(resumeTick: Int, onOpen: (String) -> Unit) {
                         if (lat != null && lon != null && here != null) {
                             val out = FloatArray(1)
                             android.location.Location.distanceBetween(lat, lon, here.latitude, here.longitude, out)
-                            Text("여기서 ${formatDistance(out[0])}", color = color, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text(if (out[0] <= maxOf(here.accuracy, 30f)) "바로 근처" else "입구까지 ${formatDistance(out[0])}",
+                                color = color, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         }
                     }
                     val lat = r?.latitude

@@ -170,15 +170,21 @@ fun HomeScreen(
                                 if (driving) PulsingDot() else Icon(Icons.Filled.PowerSettingsNew, null, tint = Eodi.colors.secondaryText)
                             }
                         }
-                        val meters = r?.let { rec ->
-                            val lat = rec.latitude; val lon = rec.longitude
-                            if (lat == null || lon == null || here == null) null else {
+                        val lat = r?.latitude
+                        val lon = r?.longitude
+                        val distText = when {
+                            r == null -> "기록 없음"
+                            lat == null || lon == null -> "위치 없음"
+                            here == null -> "위치 받는 중…"
+                            else -> {
                                 val out = FloatArray(1)
                                 android.location.Location.distanceBetween(lat, lon, here.latitude, here.longitude, out)
-                                out[0]
+                                // 오차보다 가까우면 거리 대신 "근처"
+                                if (out[0] <= maxOf(here.accuracy, 30f)) "바로 근처"
+                                else "${formatDistance(out[0])} · ±${here.accuracy.toInt()}m"
                             }
                         }
-                        StatusTile("위치 상태", "차와의 거리", meters?.let(::formatDistance) ?: "알 수 없음",
+                        StatusTile("주차장 입구까지", "차와의 거리", distText,
                             Modifier.weight(1f)) {
                             Box(Modifier.size(46.dp).clip(CircleShape).background(Color(0x265AA9F5)), contentAlignment = Alignment.Center) {
                                 Icon(Icons.Filled.LocationOn, null, tint = Color(0xFF3F8EE8))
@@ -215,7 +221,13 @@ fun rememberLastLocation(tick: Int): android.location.Location? {
     var loc by remember { mutableStateOf<android.location.Location?>(null) }
     LaunchedEffect(tick) {
         if (granted(ctx, Manifest.permission.ACCESS_FINE_LOCATION) || granted(ctx, Manifest.permission.ACCESS_COARSE_LOCATION)) {
-            LocationServices.getFusedLocationProviderClient(ctx).lastLocation.addOnSuccessListener { if (it != null) loc = it }
+            val client = LocationServices.getFusedLocationProviderClient(ctx)
+            // 저장된 위치는 오래됐을 수 있어서, 2분 안의 것만 먼저 쓰고 지금 위치를 새로 받음
+            client.lastLocation.addOnSuccessListener {
+                if (it != null && System.currentTimeMillis() - it.time < 120_000 && loc == null) loc = it
+            }
+            client.getCurrentLocation(com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY, null)
+                .addOnSuccessListener { if (it != null) loc = it }
         }
     }
     return loc

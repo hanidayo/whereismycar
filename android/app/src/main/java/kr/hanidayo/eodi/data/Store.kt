@@ -188,6 +188,23 @@ object Store {
     }
 
     /** 실제 층으로 고치고, 그 주차장 학습값에 반영 */
+    /** 기록 지우기 (가족 폰에서도 지워짐) */
+    fun deleteRecord(id: String) {
+        val r = record(id) ?: return
+        removeLocal(id)
+        if (r.synced) push { it.deleteParking(id) }
+    }
+
+    private fun removeLocal(id: String) {
+        record(id)?.let { photoFile(it)?.delete() }
+        update { d ->
+            d.copy(
+                records = d.records.filterNot { it.id == id },
+                garages = d.garages.map { g -> g.copy(samples = g.samples.filterNot { it.recordId == id }) },
+            )
+        }
+    }
+
     /** 음성으로 말한 기둥 번호(·층) 저장. 층을 말했으면 보정으로 처리해 학습에도 반영 */
     fun applyVoice(id: String, v: kr.hanidayo.eodi.util.PillarSpeech.Result) {
         val r0 = record(id) ?: return
@@ -328,8 +345,10 @@ object Store {
             if (remote.cars.isEmpty()) local.cars.forEach { c.putCar(it) } // 첫 기기: 내 차 목록을 올림
 
             val localOnlyGarages = local.garages.filter { g -> remote.garages.none { it.id == g.id } }
+            val gone = remote.deleted.toSet()
+            local.records.filter { it.id in gone }.forEach { photoFile(it)?.delete() }
             update { d ->
-                val records = d.records.toMutableList()
+                val records = d.records.filterNot { it.id in gone }.toMutableList()
                 for (rp in remote.parkings) {
                     val i = records.indexOfFirst { it.id == rp.id }
                     if (i >= 0) {
@@ -358,9 +377,24 @@ object Store {
     suspend fun uploadPending() {
         val c = client ?: return
         try {
+            var mergedAway = false
             for (r in _data.value.records.filter { !it.synced }) {
-                c.postParking(r)
-                update { d -> d.copy(records = d.records.map { if (it.id == r.id) it.copy(synced = true) else it }) }
+                val res = c.postParking(r)
+                if (res.mergedInto != null || res.deleted == true) {
+                    // 같이 탄 가족 폰이 먼저 기록함(또는 지워진 기록) → 내 것은 지우고 서버 기록을 받음
+                    removeLocal(r.id)
+                    mergedAway = true
+                } else {
+                    update { d -> d.copy(records = d.records.map { if (it.id == r.id) it.copy(synced = true) else it }) }
+                }
+            }
+            if (mergedAway) {
+                runCatching { c.state() }.getOrNull()?.let { remote ->
+                    update { d ->
+                        d.copy(records = d.records + remote.parkings.filter { rp -> d.records.none { it.id == rp.id } }
+                            .map { it.copy(synced = true, photoFile = null, photoPending = false) })
+                    }
+                }
             }
             for (r in _data.value.records.filter { it.synced && it.photoPending }) {
                 val f = photoFile(r) ?: continue
